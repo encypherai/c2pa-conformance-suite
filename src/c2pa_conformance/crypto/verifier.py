@@ -168,8 +168,12 @@ def build_crypto_context(
     """Build context dict entries for crypto/hash verification results.
 
     These are merged into the evaluation context so predicates can
-    reference crypto validation state.
+    reference crypto validation state. Wires COSE signature data,
+    certificate info, timestamp validation, and OCSP data into paths
+    that predicate operators expect.
     """
+    is_trusted = sig_result.trust_status == "signingCredential.trusted"
+
     ctx: dict[str, Any] = {
         "signature": {
             "is_valid": sig_result.signature_valid,
@@ -185,15 +189,231 @@ def build_crypto_context(
         },
         "trust": {
             "status_code": sig_result.trust_status,
-            "is_trusted": sig_result.trust_status == "signingCredential.trusted",
+            "is_trusted": is_trusted,
         },
+        # Aliases expected by predicate operators
+        "claim_signature": {"valid": sig_result.signature_valid},
+        "signature_verified": sig_result.signature_valid,
+        "cert_chain": {"valid": sig_result.chain_valid},
+        "signing_credential": {"trusted": is_trusted},
     }
+
+    # Pre-populate emitted statuses for check_status operators in sequences
+    emitted: set[str] = set()
+    if sig_result.signature_valid:
+        emitted.add("claimSignature.validated")
+    if sig_result.signature_status:
+        emitted.add(sig_result.signature_status)
+    if sig_result.chain_valid:
+        emitted.add("signingCredential.validated")
+    if sig_result.chain_status:
+        emitted.add(sig_result.chain_status)
+    if sig_result.trust_status:
+        emitted.add(sig_result.trust_status)
+    if sig_result.algorithm_allowed:
+        emitted.add("algorithm.supported")
+    ctx["_emitted_statuses"] = emitted
+
+    # Wire COSE signature fields for predicates that reference them
+    cose = sig_result.cose_signature
+    if cose:
+        protected = _cose_header_to_named(cose.protected_header, cose.algorithm_name)
+        unprotected = _cose_header_to_named(cose.unprotected_header, "")
+
+        cose_ctx: dict[str, Any] = {
+            "protected_header": protected,
+            "unprotected_header": unprotected,
+            "algorithm_id": cose.algorithm_id,
+            "algorithm_name": cose.algorithm_name,
+        }
+
+        # x5chain
+        if cose.x5chain:
+            cose_ctx["unprotected_header"]["x5chain"] = cose.x5chain
+            ctx["x5chain"] = cose.x5chain
+            ctx["certificates"] = {"signer": True}
+
+            # Parse leaf certificate for signing_certificate context
+            cert_info = _parse_cert_summary(cose.x5chain[0])
+            if cert_info:
+                ctx["signing_certificate"] = cert_info
+                # Build validity_periods list for the full chain
+                chain_periods = []
+                for der in cose.x5chain:
+                    ci = _parse_cert_summary(der)
+                    if ci and "validity_period" in ci:
+                        chain_periods.append(ci["validity_period"])
+                if chain_periods:
+                    ctx["signing_certificate_chain"] = {
+                        "validity_periods": chain_periods,
+                    }
+
+        # Timestamp tokens
+        tst_tokens: list[Any] = []
+        if cose.sig_tst is not None:
+            cose_ctx["unprotected_header"]["sigTst"] = cose.sig_tst
+            tst_tokens.append(cose.sig_tst)
+        if cose.sig_tst2 is not None:
+            cose_ctx["unprotected_header"]["sigTst2"] = cose.sig_tst2
+            tst_tokens.append(cose.sig_tst2)
+        if tst_tokens:
+            cose_ctx["unprotected_header"]["tstToken"] = tst_tokens
+
+        # r_vals (OCSP/CRL revocation data)
+        if cose.r_vals is not None:
+            cose_ctx["unprotected_header"]["rVals"] = cose.r_vals
+            if isinstance(cose.r_vals, dict):
+                ocsp = cose.r_vals.get("ocspVals", cose.r_vals.get("ocsp", []))
+                if isinstance(ocsp, list) and ocsp:
+                    ctx["ocsp_responses"] = ocsp
+
+        ctx["cose_signature"] = cose_ctx
+
+        # Validate timestamps and wire results
+        _wire_timestamp_context(ctx, cose)
 
     if hash_result and hash_result.hash_valid is not None:
         ctx["hash"] = {
             "is_valid": hash_result.hash_valid,
+            "match": hash_result.hash_valid,
             "status_code": hash_result.hash_status,
             "message": hash_result.hash_message,
         }
+        ctx["binding_verified"] = hash_result.hash_valid
+        if hash_result.hash_status:
+            emitted.add(hash_result.hash_status)
 
     return ctx
+
+
+def _cose_header_to_named(
+    raw_header: dict[Any, Any],
+    algorithm_name: str,
+) -> dict[str, Any]:
+    """Map COSE integer header keys to string names for predicate access."""
+    named: dict[str, Any] = {}
+    if not raw_header:
+        return named
+
+    # Known COSE header label mappings
+    label_map: dict[int, str] = {
+        1: "alg",
+        4: "kid",
+        6: "iat",
+        33: "x5chain",
+    }
+
+    for k, v in raw_header.items():
+        if isinstance(k, int) and k in label_map:
+            named[label_map[k]] = v
+        elif isinstance(k, str):
+            named[k] = v
+
+    # Always use string name for alg, not the raw integer COSE ID
+    if algorithm_name:
+        named["alg"] = algorithm_name
+
+    return named
+
+
+def _parse_cert_summary(der_cert: bytes) -> dict[str, Any] | None:
+    """Parse basic certificate info from DER-encoded X.509."""
+    try:
+        from cryptography import x509
+
+        cert = x509.load_der_x509_certificate(der_cert)
+        not_before = cert.not_valid_before_utc.isoformat()
+        not_after = cert.not_valid_after_utc.isoformat()
+        return {
+            "subject": cert.subject.rfc4514_string(),
+            "issuer": cert.issuer.rfc4514_string(),
+            "not_before": not_before,
+            "not_after": not_after,
+            "validity_period": {
+                "not_before": not_before,
+                "not_after": not_after,
+            },
+            "public_key": True,
+        }
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
+def _wire_timestamp_context(
+    ctx: dict[str, Any],
+    cose: CoseSignature,
+) -> None:
+    """Validate timestamp tokens and wire results into context."""
+    from c2pa_conformance.crypto.timestamp import parse_tst_header, validate_timestamp
+
+    tst_data = cose.sig_tst or cose.sig_tst2
+    if tst_data is None:
+        return
+
+    tst_result = validate_timestamp(tst_data, cose.signature_bytes)
+
+    ctx["timestamp"] = {
+        "valid": tst_result.is_valid,
+        "status_code": tst_result.status_code,
+        "message": tst_result.message,
+    }
+    ctx["timestamp_validated"] = tst_result.is_valid
+
+    if tst_result.gen_time:
+        gen_iso = tst_result.gen_time.isoformat()
+        ctx["timeStampToken"] = {"tspInfo": {"genTime": gen_iso}}
+        ctx["tst"] = {"signing_time": gen_iso}
+
+        # Extract TSA certificate from timestamp token CMS structure
+        tokens = parse_tst_header(tst_data)
+        tsa_info = _extract_tsa_cert_info(tokens[0] if tokens else b"")
+        if tsa_info:
+            ctx["tsa_certificate"] = tsa_info
+
+        # Check timestamp against signer cert validity if available
+        signing_cert = ctx.get("signing_certificate", {})
+        if signing_cert.get("not_before") and signing_cert.get("not_after"):
+            from c2pa_conformance.crypto.timestamp import check_timestamp_validity
+
+            validity_result = check_timestamp_validity(
+                tst_result,
+                cert_not_before=datetime.fromisoformat(signing_cert["not_before"]),
+                cert_not_after=datetime.fromisoformat(signing_cert["not_after"]),
+            )
+            if validity_result.is_valid:
+                ctx["_emitted_statuses"].add("timeStamp.trusted")
+                ctx["_emitted_statuses"].add("timeStamp.validated")
+
+
+def _extract_tsa_cert_info(token_bytes: bytes) -> dict[str, Any] | None:
+    """Extract TSA certificate info from an RFC 3161 timestamp token."""
+    if not token_bytes:
+        return None
+    try:
+        import warnings
+
+        from cryptography.hazmat.primitives.serialization.pkcs7 import (
+            load_der_pkcs7_certificates,
+        )
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", (DeprecationWarning, UserWarning))
+            certs = load_der_pkcs7_certificates(token_bytes)
+        if not certs:
+            return None
+        # First cert is the TSA signing certificate
+        tsa = certs[0]
+        not_before = tsa.not_valid_before_utc.isoformat()
+        not_after = tsa.not_valid_after_utc.isoformat()
+        return {
+            "subject": tsa.subject.rfc4514_string(),
+            "issuer": tsa.issuer.rfc4514_string(),
+            "not_before": not_before,
+            "not_after": not_after,
+            "validity_period": {
+                "not_before": not_before,
+                "not_after": not_after,
+            },
+        }
+    except (ValueError, TypeError, AttributeError):
+        return None

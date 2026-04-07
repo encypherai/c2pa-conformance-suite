@@ -166,6 +166,10 @@ def parse_boxes(
         payload_offset = offset + header_size
         box_end = offset + total_size
 
+        # Zero-type boxes are padding/terminator, not valid JUMBF
+        if box_type == b"\x00\x00\x00\x00":
+            break
+
         if box_end > end:
             if _strict:
                 raise JUMBFParseError(

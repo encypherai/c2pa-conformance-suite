@@ -175,7 +175,8 @@ def _generate_single(defn: VectorDefinition, pki: dict[str, CertKeyPair]) -> byt
 
 
 def _generate_ingredient_vector(
-    defn: VectorDefinition, pki: dict[str, CertKeyPair],
+    defn: VectorDefinition,
+    pki: dict[str, CertKeyPair],
 ) -> bytes:
     """Generate a multi-manifest ingredient vector."""
     signer = pki.get(defn.signer_variant, pki["valid"])

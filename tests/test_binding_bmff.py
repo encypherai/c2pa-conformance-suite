@@ -1,12 +1,18 @@
-"""Tests for BMFF hash and boxes hash binding verifiers."""
+"""Tests for BMFF hash, boxes hash, and BMFF box parser verifiers."""
 
 from __future__ import annotations
 
 import hashlib
+import struct
 
 from c2pa_conformance.binding.bmff_hash import (
     _compute_merkle_root,
     verify_bmff_hash,
+)
+from c2pa_conformance.binding.bmff_parser import (
+    classify_exclusion,
+    parse_bmff_boxes,
+    resolve_xpath_exclusions,
 )
 from c2pa_conformance.binding.boxes_hash import (
     verify_boxes_hash,
@@ -391,3 +397,133 @@ def test_boxes_hash_empty_asset() -> None:
     # An empty box produces sha256("") which matches our declared hash
     assert result.is_valid
     assert result.status_code == "assertion.boxesHash.match"
+
+
+# ---------------------------------------------------------------------------
+# BMFF box tree parser tests
+# ---------------------------------------------------------------------------
+
+
+def _make_box(box_type: bytes, payload: bytes) -> bytes:
+    """Build a raw ISOBMFF box."""
+    size = 8 + len(payload)
+    return struct.pack(">I", size) + box_type + payload
+
+
+def _make_uuid_box(uuid_bytes: bytes, payload: bytes) -> bytes:
+    """Build a raw UUID box."""
+    size = 8 + 16 + len(payload)
+    return struct.pack(">I", size) + b"uuid" + uuid_bytes + payload
+
+
+class TestParseBmffBoxes:
+    def test_single_box(self) -> None:
+        data = _make_box(b"ftyp", b"\x00" * 12)
+        boxes = parse_bmff_boxes(data)
+        assert len(boxes) == 1
+        assert boxes[0].box_type == b"ftyp"
+        assert boxes[0].offset == 0
+        assert boxes[0].size == 20
+
+    def test_multiple_boxes(self) -> None:
+        ftyp = _make_box(b"ftyp", b"\x00" * 4)
+        mdat = _make_box(b"mdat", b"\x01" * 8)
+        moov = _make_box(b"moov", b"\x02" * 16)
+        data = ftyp + mdat + moov
+        boxes = parse_bmff_boxes(data)
+        assert len(boxes) == 3
+        assert boxes[0].type_str == "ftyp"
+        assert boxes[1].type_str == "mdat"
+        assert boxes[2].type_str == "moov"
+        assert boxes[1].offset == boxes[0].size
+        assert boxes[2].offset == boxes[0].size + boxes[1].size
+
+    def test_uuid_box(self) -> None:
+        uuid = bytes.fromhex("d8fec3d61b0e483c92975828877ec481")
+        data = _make_uuid_box(uuid, b"\xff" * 10)
+        boxes = parse_bmff_boxes(data)
+        assert len(boxes) == 1
+        assert boxes[0].box_type == b"uuid"
+        assert boxes[0].extended_type == uuid
+
+    def test_extended_size_box(self) -> None:
+        payload = b"\x00" * 8
+        total_size = 16 + len(payload)
+        data = struct.pack(">I", 1) + b"mdat" + struct.pack(">Q", total_size) + payload
+        boxes = parse_bmff_boxes(data)
+        assert len(boxes) == 1
+        assert boxes[0].size == total_size
+
+    def test_empty_data(self) -> None:
+        assert parse_bmff_boxes(b"") == []
+
+    def test_truncated_data(self) -> None:
+        assert parse_bmff_boxes(b"\x00\x00\x00") == []
+
+
+class TestClassifyExclusion:
+    def test_uuid_is_c2pa_required(self) -> None:
+        assert classify_exclusion("/uuid") == "c2pa_required"
+
+    def test_ftyp_is_c2pa_required(self) -> None:
+        assert classify_exclusion("/ftyp") == "c2pa_required"
+
+    def test_free_is_free(self) -> None:
+        assert classify_exclusion("/free") == "free"
+
+    def test_skip_is_skip(self) -> None:
+        assert classify_exclusion("/skip") == "skip"
+
+    def test_mfra_is_skip(self) -> None:
+        assert classify_exclusion("/mfra") == "skip"
+
+    def test_unknown_type(self) -> None:
+        assert classify_exclusion("/meta") == "unknown"
+
+
+class TestResolveXpathExclusions:
+    def test_simple_type_match(self) -> None:
+        uuid = bytes(16)
+        data = (
+            _make_box(b"ftyp", b"\x00" * 4)
+            + _make_uuid_box(uuid, b"\x00" * 10)
+            + _make_box(b"free", b"\x00" * 4)
+        )
+        boxes = parse_bmff_boxes(data)
+        exclusions = [{"xpath": "/ftyp"}, {"xpath": "/free"}]
+        resolved = resolve_xpath_exclusions(boxes, exclusions)
+        assert len(resolved) == 2
+        assert resolved[0]["xpath"] == "/ftyp"
+        assert resolved[0]["start"] == 0
+        assert resolved[0]["type"] == "c2pa_required"
+        assert resolved[1]["xpath"] == "/free"
+        assert resolved[1]["type"] == "free"
+
+    def test_uuid_with_data_discriminator(self) -> None:
+        c2pa_uuid = bytes.fromhex("d8fec3d61b0e483c92975828877ec481")
+        other_uuid = bytes(16)
+        data = _make_uuid_box(c2pa_uuid, b"\x00" * 4) + _make_uuid_box(other_uuid, b"\x00" * 4)
+        boxes = parse_bmff_boxes(data)
+        exclusions = [
+            {
+                "xpath": "/uuid",
+                "data": [{"offset": 8, "value": "d8fec3d61b0e483c92975828877ec481"}],
+            }
+        ]
+        resolved = resolve_xpath_exclusions(boxes, exclusions)
+        assert len(resolved) == 1
+        assert resolved[0]["start"] == 0
+
+    def test_missing_box_type_omitted(self) -> None:
+        data = _make_box(b"ftyp", b"\x00" * 4)
+        boxes = parse_bmff_boxes(data)
+        resolved = resolve_xpath_exclusions(boxes, [{"xpath": "/mfra"}])
+        assert len(resolved) == 0
+
+    def test_all_within_asset_bounds(self) -> None:
+        data = _make_box(b"ftyp", b"\x00" * 4) + _make_box(b"free", b"\x00" * 4)
+        boxes = parse_bmff_boxes(data)
+        exclusions = [{"xpath": "/ftyp"}, {"xpath": "/free"}]
+        resolved = resolve_xpath_exclusions(boxes, exclusions)
+        for r in resolved:
+            assert r["start"] + r["length"] <= len(data)

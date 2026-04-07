@@ -155,7 +155,9 @@ def _build_manifest_box(
         )
 
     assertion_store = build_superbox(
-        C2PA_ASSERTION_STORE_UUID, "c2pa.assertions", assertion_boxes,
+        C2PA_ASSERTION_STORE_UUID,
+        "c2pa.assertions",
+        assertion_boxes,
     )
 
     # Build claim v2 format
@@ -163,12 +165,16 @@ def _build_manifest_box(
 
     claim_cbor = cbor2.dumps(claim)
     claim_box = build_superbox(
-        C2PA_CLAIM_UUID, "c2pa.claim.v2", [build_cbor_box(claim_cbor)],
+        C2PA_CLAIM_UUID,
+        "c2pa.claim.v2",
+        [build_cbor_box(claim_cbor)],
     )
 
     signature_bytes = sign_cose(claim_cbor, private_key, cert_chain, algorithm)
     signature_box = build_superbox(
-        C2PA_SIGNATURE_UUID, "c2pa.signature", [build_cbor_box(signature_bytes)],
+        C2PA_SIGNATURE_UUID,
+        "c2pa.signature",
+        [build_cbor_box(signature_bytes)],
     )
 
     return build_superbox(
@@ -197,9 +203,7 @@ def _build_claim_v2(
     claim["claim_generator_info"] = {"name": name, "version": version}
 
     # signature URL
-    claim["signature"] = (
-        f"self#jumbf=/c2pa/{manifest_label}/c2pa.signature"
-    )
+    claim["signature"] = f"self#jumbf=/c2pa/{manifest_label}/c2pa.signature"
 
     # assertion references (v2 uses created_assertions with relative URIs)
     claim["created_assertions"] = assertion_refs

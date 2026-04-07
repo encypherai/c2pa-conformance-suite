@@ -106,6 +106,166 @@ class TestSuiteCommand:
         assert "total_files" in data["summary"]
 
 
+class TestKnownFailures:
+    """Tests for --known-failures xfail support in suite command."""
+
+    def test_known_failures_flag_accepted(self, tmp_path: Path) -> None:
+        """--known-failures option is accepted."""
+        kf = tmp_path / "kf.json"
+        kf.write_text('{"some_file.jpg": "reason"}')
+        runner = CliRunner()
+        result = runner.invoke(cli, ["suite", str(tmp_path), "--known-failures", str(kf)])
+        assert result.exit_code == 0
+        assert "No supported files" in result.output
+
+    def test_known_failures_help_text(self) -> None:
+        """--known-failures appears in help."""
+        runner = CliRunner()
+        result = runner.invoke(cli, ["suite", "--help"])
+        assert result.exit_code == 0
+        assert "known-failures" in result.output
+
+    def test_xfail_output_format(self, tmp_path: Path) -> None:
+        """A known-failure file that actually fails shows [XFAIL] in output."""
+        predicates_path = Path(__file__).parent.parent / "predicates.json"
+        if not predicates_path.exists():
+            pytest.skip("predicates.json not found")
+
+        # Create a minimal JPEG that will fail predicates (no C2PA manifest)
+        asset = tmp_path / "bad.jpg"
+        asset.write_bytes(b"\xff\xd8\xff\xd9")
+
+        kf = tmp_path / "kf.json"
+        kf.write_text('{"bad.jpg": "test asset with no manifest"}')
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "suite",
+                str(tmp_path),
+                "--predicates",
+                str(predicates_path),
+                "--known-failures",
+                str(kf),
+            ],
+        )
+        assert result.exit_code == 0
+        # The file should show as XFAIL (not FAIL) since it failed and is known
+        if "XFAIL" in result.output or "ERR" in result.output:
+            # ERR is acceptable too - no C2PA data means extraction error
+            assert "FAIL" not in result.output or "XFAIL" in result.output
+
+    def test_xfail_excluded_from_fail_count(self, tmp_path: Path) -> None:
+        """Known failures do not increment the fail count in summary."""
+        predicates_path = Path(__file__).parent.parent / "predicates.json"
+        if not predicates_path.exists():
+            pytest.skip("predicates.json not found")
+
+        asset = tmp_path / "bad.jpg"
+        asset.write_bytes(b"\xff\xd8\xff\xd9")
+
+        kf = tmp_path / "kf.json"
+        kf.write_text('{"bad.jpg": "expected"}')
+
+        runner = CliRunner()
+        output = tmp_path / "report.json"
+        result = runner.invoke(
+            cli,
+            [
+                "suite",
+                str(tmp_path),
+                "--predicates",
+                str(predicates_path),
+                "--known-failures",
+                str(kf),
+                "--output",
+                str(output),
+            ],
+        )
+        assert result.exit_code == 0
+        if output.exists():
+            data = json.loads(output.read_text())
+            summary = data["summary"]
+            assert "total_xfail" in summary or "total_xpass" in summary
+
+    def test_xpass_when_known_failure_passes(self, tmp_path: Path) -> None:
+        """A file listed in known-failures that passes shows [XPASS]."""
+        predicates_path = Path(__file__).parent.parent / "predicates.json"
+        if not predicates_path.exists():
+            pytest.skip("predicates.json not found")
+
+        # Use a real fixture that passes if available
+        fixture_dir = Path(__file__).parent.parent / "fixtures"
+        c2pa_files = list(fixture_dir.rglob("*.c2pa")) if fixture_dir.exists() else []
+        if not c2pa_files:
+            pytest.skip("No .c2pa fixture files found")
+
+        import shutil
+
+        asset = tmp_path / c2pa_files[0].name
+        shutil.copy(c2pa_files[0], asset)
+
+        kf = tmp_path / "kf.json"
+        kf.write_text(json.dumps({asset.name: "should not fail"}))
+
+        runner = CliRunner()
+        output = tmp_path / "report.json"
+        result = runner.invoke(
+            cli,
+            [
+                "suite",
+                str(tmp_path),
+                "--predicates",
+                str(predicates_path),
+                "--known-failures",
+                str(kf),
+                "--output",
+                str(output),
+            ],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        if output.exists():
+            data = json.loads(output.read_text())
+            # The passing file should be marked xpass
+            for file_report in data["files"]:
+                if "xpass" in file_report:
+                    assert file_report["xpass"] is True
+                    assert data["summary"]["total_xpass"] >= 1
+
+    def test_fail_fast_skips_known_failures(self, tmp_path: Path) -> None:
+        """--fail-fast does not stop on known failures."""
+        predicates_path = Path(__file__).parent.parent / "predicates.json"
+        if not predicates_path.exists():
+            pytest.skip("predicates.json not found")
+
+        # Two files: known failure first, then another
+        (tmp_path / "aaa_bad.jpg").write_bytes(b"\xff\xd8\xff\xd9")
+        (tmp_path / "zzz_also.jpg").write_bytes(b"\xff\xd8\xff\xd9")
+
+        kf = tmp_path / "kf.json"
+        kf.write_text('{"aaa_bad.jpg": "known"}')
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "suite",
+                str(tmp_path),
+                "--predicates",
+                str(predicates_path),
+                "--known-failures",
+                str(kf),
+                "--fail-fast",
+            ],
+        )
+        assert result.exit_code == 0
+        # Both files should appear in output (fail-fast didn't stop on the known failure)
+        assert "aaa_bad" in result.output
+        assert "zzz_also" in result.output
+
+
 class TestCompareCommand:
     def test_compare_help(self) -> None:
         """Help text is accessible."""

@@ -153,9 +153,7 @@ class TestPredicateEvaluation:
             },
         }
         result = engine.evaluate_predicate("PRED-STRU-008", context)
-        assert result.result in (
-            ResultType.PASS, ResultType.INFORMATIONAL, ResultType.FAIL
-        )
+        assert result.result in (ResultType.PASS, ResultType.INFORMATIONAL, ResultType.FAIL)
 
 
 class TestPredicateIdConsistency:
@@ -164,17 +162,13 @@ class TestPredicateIdConsistency:
     def test_all_ids_match_pattern(self, all_predicates: list[dict]) -> None:
         pattern = re.compile(r"^PRED-[A-Z]+-\d{3}$")
         for pred in all_predicates:
-            assert pattern.match(pred["predicate_id"]), (
-                f"bad ID format: {pred['predicate_id']}"
-            )
+            assert pattern.match(pred["predicate_id"]), f"bad ID format: {pred['predicate_id']}"
 
     def test_all_source_rules_match_pattern(self, all_predicates: list[dict]) -> None:
         pattern = re.compile(r"^VAL-[A-Z]+-\d{4}$")
         for pred in all_predicates:
             for rule_id in pred["source_rules"]:
-                assert pattern.match(rule_id), (
-                    f"{pred['predicate_id']} has bad rule ID: {rule_id}"
-                )
+                assert pattern.match(rule_id), f"{pred['predicate_id']} has bad rule ID: {rule_id}"
 
     def test_full_rule_coverage(self, all_predicates: list[dict]) -> None:
         """All 237 v2.4 rules should be covered."""

@@ -106,7 +106,9 @@ class TestGetInsertPosition:
 
 class TestBuildBoundManifestJpeg:
     def test_produces_valid_embedded_jpeg(
-        self, valid_key, cert_chain,
+        self,
+        valid_key,
+        cert_chain,
     ) -> None:
         """Embedded JPEG starts with SOI marker."""
         jpeg = minimal_jpeg()
@@ -138,9 +140,7 @@ class TestBuildBoundManifestJpeg:
         manifest = store.active_manifest
         assert manifest is not None
 
-        data_hash_assertions = [
-            a for a in manifest.assertions if a.label == "c2pa.hash.data"
-        ]
+        data_hash_assertions = [a for a in manifest.assertions if a.label == "c2pa.hash.data"]
         assert len(data_hash_assertions) == 1
 
         assertion_data = cbor2.loads(data_hash_assertions[0].raw_cbor)
@@ -264,7 +264,9 @@ class TestBuildBoundManifestJpeg:
 
 class TestBuildBoundManifestPng:
     def test_produces_valid_embedded_png(
-        self, valid_key, cert_chain,
+        self,
+        valid_key,
+        cert_chain,
     ) -> None:
         png = minimal_png()
         embedded, _ = build_bound_manifest(
@@ -366,7 +368,12 @@ class TestHashAlgorithms:
         ],
     )
     def test_hash_algorithm_override(
-        self, valid_key, cert_chain, alg_id, hash_alg, digest_size,
+        self,
+        valid_key,
+        cert_chain,
+        alg_id,
+        hash_alg,
+        digest_size,
     ) -> None:
         jpeg = minimal_jpeg()
         embedded, jumbf = build_bound_manifest(

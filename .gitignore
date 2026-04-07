@@ -12,3 +12,4 @@ build/
 .mypy_cache/
 *.pem
 fixtures/pki/*.pem
+fixtures/c2pa-official/

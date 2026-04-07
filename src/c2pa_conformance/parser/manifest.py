@@ -40,7 +40,7 @@ class Assertion:
 
     @property
     def is_hash_bmff(self) -> bool:
-        return self.label in ("c2pa.hash.bmff", "c2pa.hash.bmff.v2")
+        return self.label in ("c2pa.hash.bmff", "c2pa.hash.bmff.v2", "c2pa.hash.bmff.v3")
 
     @property
     def is_hash_boxes(self) -> bool:
@@ -283,9 +283,10 @@ def parse_manifest_store(jumbf_bytes: bytes) -> ManifestStore:
     if not boxes:
         return store
 
-    # The top-level box should be the manifest store superbox
-    # It may be wrapped in a single jumb or be a sequence of jumb boxes
-    root = boxes[0] if len(boxes) == 1 and boxes[0].is_superbox else None
+    # The top-level box should be the manifest store superbox.
+    # Use the first superbox regardless of trailing boxes (some formats
+    # include zero-padding that produces phantom trailing entries).
+    root = boxes[0] if boxes[0].is_superbox else None
 
     manifest_boxes: list[JUMBFBox]
     if root and root.children:

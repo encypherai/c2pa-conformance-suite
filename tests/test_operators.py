@@ -10,8 +10,11 @@ from typing import Any
 
 from c2pa_conformance.evaluator.engine import (
     _eval_check_uniqueness,
+    _eval_compare,
+    _eval_condition,
     _eval_count,
     _eval_coverage_check,
+    _eval_delegate,
     _eval_dispatch_by_type,
     _eval_full_coverage,
     _eval_if,
@@ -596,3 +599,146 @@ class TestScanForDelimiters:
         content = "-----BEGIN C2PA MANIFEST----- data -----END C2PA MANIFEST-----"
         ok, _ = _eval_scan_for_delimiters({"asset_bytes": content}, self._cond())
         assert ok is True
+
+
+# ---------------------------------------------------------------------------
+# Compare: value literal vs field path resolution
+# ---------------------------------------------------------------------------
+
+
+class TestCompareValueLiteral:
+    def test_value_key_is_literal(self) -> None:
+        """The 'value' key should be treated as a literal, not resolved as a field path."""
+        ctx: dict[str, Any] = {"field_type": "hashed_uri"}
+        cond = {
+            "op": "compare",
+            "field": "field_type",
+            "relation": "eq",
+            "value": "hashed_uri",
+        }
+        ok, _ = _eval_compare(ctx, cond)
+        assert ok is True
+
+    def test_value_key_mismatch(self) -> None:
+        ctx: dict[str, Any] = {"field_type": "other_type"}
+        cond = {
+            "op": "compare",
+            "field": "field_type",
+            "relation": "eq",
+            "value": "hashed_uri",
+        }
+        ok, _ = _eval_compare(ctx, cond)
+        assert ok is False
+
+    def test_compare_with_then_branch_true(self) -> None:
+        """When compare is true and then-branch exists, evaluate it."""
+        ctx: dict[str, Any] = {"field_type": "hashed_uri"}
+        cond = {
+            "op": "compare",
+            "field": "field_type",
+            "relation": "eq",
+            "value": "hashed_uri",
+            "then": {"op": "field_present", "field": "field_type"},
+        }
+        ok, _ = _eval_condition(ctx, cond)
+        assert ok is True
+
+    def test_compare_with_then_branch_false_guard(self) -> None:
+        """When compare is false and then-branch exists, return True (guard not matched)."""
+        ctx: dict[str, Any] = {"field_type": "other"}
+        cond = {
+            "op": "compare",
+            "field": "field_type",
+            "relation": "eq",
+            "value": "hashed_uri",
+            "then": {"op": "field_present", "field": "field_type"},
+        }
+        ok, _ = _eval_condition(ctx, cond)
+        assert ok is True
+
+
+# ---------------------------------------------------------------------------
+# Delegate: predicate and procedure delegation
+# ---------------------------------------------------------------------------
+
+
+class TestDelegate:
+    def test_delegate_to_named_procedure_passes(self) -> None:
+        """Delegation to hashed_uri_validation_procedure with no item data passes."""
+        ctx: dict[str, Any] = {"_item": {}}
+        ok, _ = _eval_delegate(ctx, {"op": "delegate", "to": "hashed_uri_validation_procedure"})
+        assert ok is True
+
+    def test_delegate_to_unknown_passes(self) -> None:
+        """Unknown delegation targets pass through."""
+        ok, _ = _eval_delegate({}, {"op": "delegate", "to": "nonexistent"})
+        assert ok is True
+
+    def test_delegate_to_predicate(self) -> None:
+        """Delegation to a known predicate evaluates its condition."""
+        predicates = {
+            "PRED-TEST-001": {
+                "condition": {
+                    "op": "field_present",
+                    "field": "test_field",
+                }
+            }
+        }
+        ctx: dict[str, Any] = {"_predicates": predicates, "test_field": "value"}
+        ok, _ = _eval_delegate(ctx, {"op": "delegate", "predicate": "PRED-TEST-001"})
+        assert ok is True
+
+    def test_delegate_to_predicate_fails(self) -> None:
+        """Delegation to a predicate whose condition fails returns False."""
+        predicates = {
+            "PRED-TEST-001": {
+                "condition": {
+                    "op": "field_present",
+                    "field": "missing_field",
+                }
+            }
+        }
+        ctx: dict[str, Any] = {"_predicates": predicates}
+        ok, _ = _eval_delegate(ctx, {"op": "delegate", "predicate": "PRED-TEST-001"})
+        assert ok is False
+
+    def test_delegate_to_predicates_all_pass(self) -> None:
+        """Delegation to multiple predicates: all must pass."""
+        predicates = {
+            "P1": {"condition": {"op": "field_present", "field": "a"}},
+            "P2": {"condition": {"op": "field_present", "field": "b"}},
+        }
+        ctx: dict[str, Any] = {"_predicates": predicates, "a": 1, "b": 2}
+        ok, _ = _eval_delegate(ctx, {"op": "delegate", "to_predicates": ["P1", "P2"]})
+        assert ok is True
+
+    def test_delegate_to_predicates_one_fails(self) -> None:
+        predicates = {
+            "P1": {"condition": {"op": "field_present", "field": "a"}},
+            "P2": {"condition": {"op": "field_present", "field": "missing"}},
+        }
+        ctx: dict[str, Any] = {"_predicates": predicates, "a": 1}
+        ok, _ = _eval_delegate(ctx, {"op": "delegate", "to_predicates": ["P1", "P2"]})
+        assert ok is False
+
+
+# ---------------------------------------------------------------------------
+# one_of_type: on_other informational result
+# ---------------------------------------------------------------------------
+
+
+class TestOneOfTypeInformational:
+    def test_on_other_informational_passes(self) -> None:
+        """When value not in allowed but on_other.result=informational, return True."""
+        ctx: dict[str, Any] = {"_item": {"type": "unknown_type"}}
+        cond = {
+            "op": "one_of_type",
+            "allowed_types": ["c2pa_required", "free", "skip"],
+            "on_other": {
+                "status": "assertion.bmffHash.additionalExclusionsPresent",
+                "result": "informational",
+            },
+        }
+        ok, status = _eval_one_of_type(ctx, cond)
+        assert ok is True
+        assert status == "assertion.bmffHash.additionalExclusionsPresent"

@@ -71,24 +71,27 @@ def _run_validation_pipeline(
     except ManifestParseError as exc:
         raise click.ClickException(f"Manifest parsing failed: {exc}") from exc
 
+    # Read asset once for both binding verification and context
+    asset_data = asset_path.read_bytes()
+
     # Crypto
     ts = TrustAnchorStore.from_pem_file(trust_store_path) if trust_store_path else None
     sig_result = None
     hash_result = None
     if store.active_manifest:
         sig_result = verify_manifest_signature(store.active_manifest, ts)
-        asset_bytes = asset_path.read_bytes()
-        hash_result = verify_manifest_binding(store.active_manifest, asset_bytes)
+        hash_result = verify_manifest_binding(store.active_manifest, asset_data)
 
-    # Build context
-    context = _build_context(store, extraction)
+    # Build context (pass asset_data for BMFF xpath resolution)
+    context = _build_context(store, extraction, asset_bytes=asset_data)
     if sig_result:
         crypto_ctx = build_crypto_context(sig_result, hash_result)
         context.update(crypto_ctx)
-    context["asset_bytes"] = asset_path.read_bytes()
+    context["asset_bytes"] = asset_data
+    context["asset_size"] = len(asset_data)
 
     # Evaluate
-    report = engine.evaluate_all(context)
+    report = engine.evaluate_all(context, container_format=extraction.container_format)
     report.asset_path = str(asset_path)
 
     return report, context
@@ -177,6 +180,9 @@ def validate(
     # Step 2.5: Crypto verification
     ts = TrustAnchorStore.from_pem_file(trust_store) if trust_store else None
 
+    # Read asset once for both binding verification and context
+    asset_data = asset_path.read_bytes()
+
     sig_result = None
     hash_result = None
     if store.active_manifest:
@@ -184,24 +190,25 @@ def validate(
         click.echo(f"Signature: {sig_result.signature_status}")
 
         # Step 2.75: Content binding
-        asset_bytes = asset_path.read_bytes()
-        hash_result = verify_manifest_binding(store.active_manifest, asset_bytes)
+        hash_result = verify_manifest_binding(store.active_manifest, asset_data)
         if hash_result.hash_valid is not None:
             click.echo(f"Content binding: {hash_result.hash_status}")
 
     # Step 3: Build evaluation context from parsed manifest
-    context = _build_context(store, extraction)
+    context = _build_context(store, extraction, asset_bytes=asset_data)
 
     # Merge crypto context
     if sig_result:
         crypto_ctx = build_crypto_context(sig_result, hash_result)
         context.update(crypto_ctx)
 
-    # Also add raw asset_bytes to context for operators that need it
-    context["asset_bytes"] = asset_path.read_bytes()
+    context["asset_bytes"] = asset_data
+    context["asset_size"] = len(asset_data)
 
     # Step 4: Evaluate predicates
-    report = engine.evaluate_all(context, binding=binding)
+    report = engine.evaluate_all(
+        context, binding=binding, container_format=extraction.container_format
+    )
     report.asset_path = str(asset_path)
 
     click.echo(
@@ -223,25 +230,35 @@ def validate(
                 click.echo(f"  FAIL {r.predicate_id}: {r.status_code} {r.message}")
 
 
-def _build_context(store: object, extraction: object) -> dict:
+def _build_context(store: object, extraction: object, asset_bytes: bytes | None = None) -> dict:
     """Build a predicate evaluation context from parsed manifest data.
 
     Maps the ManifestStore into the flat dict structure that predicates
-    reference via dotted field paths.
+    reference via dotted field paths. Promotes key fields to top level
+    so predicate operators can resolve them directly.
+
+    Args:
+        store: Parsed ManifestStore.
+        extraction: ExtractionResult from the container extractor.
+        asset_bytes: Raw asset file bytes (needed for BMFF xpath resolution).
     """
 
     context: dict = {
         "asset_path": extraction.container_format,
         "container_format": extraction.container_format,
+        "jumbf_offset": extraction.jumbf_offset,
+        "jumbf_length": extraction.jumbf_length,
         "manifest_store": {
             "manifest_count": store.manifest_count,
             "manifests": [],
+            "all_manifests": [],
         },
     }
 
     for manifest in store.manifests:
         m: dict = {
             "label": manifest.label,
+            "identifier": manifest.label,
             "assertions": [],
             "claim": {},
             "has_signature": len(manifest.signature_bytes) > 0,
@@ -249,50 +266,202 @@ def _build_context(store: object, extraction: object) -> dict:
         }
 
         if manifest.claim:
+            claim_data = manifest.claim.data or {}
             m["claim"] = {
                 "claim_generator": manifest.claim.claim_generator,
                 "claim_generator_info": manifest.claim.claim_generator_info,
                 "signature_ref": manifest.claim.signature_ref,
                 "assertion_refs": manifest.claim.assertion_refs,
                 "is_update_manifest": manifest.claim.is_update_manifest,
-                "data": manifest.claim.data,
+                "data": claim_data,
+                # Structured claim fields for predicate access
+                "assertions": manifest.claim.assertion_refs,
+                "created_assertions": claim_data.get("created_assertions"),
+                "gathered_assertions": claim_data.get("gathered_assertions"),
+                "redacted_assertions": claim_data.get("redacted_assertions"),
             }
 
         for assertion in manifest.assertions:
             a = {
                 "label": assertion.label,
+                "uri": f"self#jumbf=/{manifest.label}/c2pa.assertions/{assertion.label}",
                 "data": assertion.data,
                 "is_hard_binding": assertion.is_hard_binding,
                 "has_raw_cbor": len(assertion.raw_cbor) > 0,
+                "raw_cbor_length": len(assertion.raw_cbor),
+                "raw_cbor": assertion.raw_cbor,
             }
+            if assertion.box:
+                a["box"] = {
+                    "offset": assertion.box.offset,
+                    "size": assertion.box.size,
+                }
             m["assertions"].append(a)
 
         context["manifest_store"]["manifests"].append(m)
+        context["manifest_store"]["all_manifests"].append(m)
 
     # Promote active manifest fields to top level for predicate access
     if store.active_manifest:
         am = store.active_manifest
-        context["active_manifest"] = context["manifest_store"]["manifests"][-1]
+        # Look up active manifest context by label, not list position
+        active_ctx = next(
+            (m for m in context["manifest_store"]["manifests"] if m.get("label") == am.label),
+            context["manifest_store"]["manifests"][-1],
+        )
+        context["active_manifest"] = active_ctx
 
         if am.claim:
-            context["claim"] = context["active_manifest"]["claim"]
+            context["claim"] = active_ctx["claim"]
             context["claim_generator"] = am.claim.claim_generator
             context["claim_generator_info"] = am.claim.claim_generator_info
+            context["claim_cbor_bytes"] = am.claim.raw_cbor
 
-        # Collect hard binding info
+        # Hard binding with promoted exclusions
         hb = am.hard_binding
         if hb:
+            binding_data = hb.data or {}
             context["hard_binding"] = {
                 "label": hb.label,
-                "data": hb.data,
+                "data": binding_data,
                 "mechanism": hb.label,
             }
+            raw_exclusions = binding_data.get("exclusions", [])
 
-        # Assertion labels for quick predicate checks
-        context["assertion_labels"] = [a.label for a in am.assertions]
+            # Promote binding assertion data under its canonical predicate name
+            if hb.is_hash_data:
+                context["data_hash_assertion"] = binding_data
+            elif hb.is_hash_bmff:
+                context["bmff_hash_assertion"] = binding_data
+            elif hb.is_hash_boxes:
+                context["boxes_hash_assertion"] = binding_data
+            elif hb.is_hash_multi_asset:
+                context["multi_asset_hash_map"] = binding_data
+
+            if raw_exclusions:
+                # For BMFF bindings, resolve xpath exclusions to byte ranges
+                if hb.is_hash_bmff and asset_bytes:
+                    from c2pa_conformance.binding.bmff_parser import (
+                        parse_bmff_boxes,
+                        resolve_xpath_exclusions,
+                    )
+
+                    bmff_boxes = parse_bmff_boxes(asset_bytes)
+                    context["exclusions"] = resolve_xpath_exclusions(bmff_boxes, raw_exclusions)
+                else:
+                    context["exclusions"] = raw_exclusions
+            elif hb.is_hash_multi_asset:
+                # Multi-asset bindings have no top-level exclusions. Set empty
+                # list so PRED-IMG-002's for_each passes with zero iterations
+                # instead of failing on a missing (None) collection.
+                context["exclusions"] = []
+
+        # Assertion labels and full assertion store
+        assertion_labels = [a.label for a in am.assertions]
+        context["assertion_labels"] = assertion_labels
         context["assertion_count"] = len(am.assertions)
+        context["assertion_store"] = {"assertions": active_ctx["assertions"]}
+
+        # claim.own_assertion_store: the set of assertion labels belonging
+        # to this manifest's claim (used by PRED-INGR-002 self-redaction check)
+        if "claim" in context and isinstance(context["claim"], dict):
+            context["claim"]["own_assertion_store"] = assertion_labels
+
+        # Ingredient manifests from ingredient assertions, enriched with
+        # cross-manifest data from the ManifestStore when available.
+        ingredient_assertions = [a for a in am.assertions if a.label.startswith("c2pa.ingredient")]
+        if ingredient_assertions:
+            # Build a label-to-manifest-context lookup for cross-manifest resolution
+            manifest_by_label: dict[str, dict] = {}
+            for m_ctx in context["manifest_store"]["manifests"]:
+                manifest_by_label[m_ctx.get("label", "")] = m_ctx
+
+            context["ingredient_manifests"] = []
+            for ia in ingredient_assertions:
+                ia_data = ia.data or {}
+                # Parse redacted_assertions URIs into structured objects
+                raw_redacted = ia_data.get("redacted_assertions", [])
+                parsed_redacted = []
+                for uri in raw_redacted:
+                    parsed = _parse_jumbf_uri(uri) if isinstance(uri, str) else {}
+                    parsed["uri"] = uri
+                    parsed_redacted.append(parsed)
+
+                entry: dict = {
+                    "label": ia.label,
+                    "data": ia_data,
+                    "relationship": ia_data.get("relationship", ""),
+                    "redacted_assertions": parsed_redacted,
+                }
+
+                # Resolve activeManifest reference to actual manifest context
+                active_ref = ia_data.get("activeManifest")
+                if isinstance(active_ref, dict):
+                    ref_url = active_ref.get("url", "")
+                    ref_parsed = _parse_jumbf_uri(ref_url)
+                    ref_label = ref_parsed.get("manifest_label", "")
+                    ref_manifest = manifest_by_label.get(ref_label)
+                    if ref_manifest:
+                        entry["manifest"] = ref_manifest
+                        # Provide the ingredient manifest's own claim data
+                        entry["claim"] = ref_manifest.get("claim", {})
+
+                context["ingredient_manifests"].append(entry)
+
+            context["manifest_by_label"] = manifest_by_label
+
+        # Parse claim.redacted_assertions into structured objects
+        if "claim" in context and isinstance(context["claim"], dict):
+            raw_claim_redacted = context["claim"].get("redacted_assertions") or []
+            if raw_claim_redacted:
+                parsed_claim_redacted = []
+                for uri in raw_claim_redacted:
+                    parsed = _parse_jumbf_uri(uri) if isinstance(uri, str) else {}
+                    parsed["uri"] = uri
+                    parsed_claim_redacted.append(parsed)
+                context["claim"]["redacted_assertions"] = parsed_claim_redacted
+
+        # Standard assertion hashed-URI fields for integrity predicates
+        std_assertions = [a for a in am.assertions if not a.is_hard_binding]
+        hashed_uri_fields: list[dict] = []
+        for sa in std_assertions:
+            if isinstance(sa.data, dict):
+                for key, val in sa.data.items():
+                    if isinstance(val, dict) and ("url" in val or "hash" in val):
+                        hashed_uri_fields.append(
+                            {
+                                "field_name": key,
+                                "assertion_label": sa.label,
+                                "field_type": "hashed_uri" if "hash" in val else "uri",
+                                "data": val,
+                            }
+                        )
+        if hashed_uri_fields:
+            context["standard_assertions"] = {
+                "hashed_uri_fields": hashed_uri_fields,
+            }
 
     return context
+
+
+def _parse_jumbf_uri(uri: str) -> dict[str, str]:
+    """Parse a JUMBF URI into structured fields.
+
+    E.g. "self#jumbf=/c2pa/manifest-label/c2pa.assertions/assertion-label"
+    -> {"target_manifest": "manifest-label", "target_assertion": "assertion-label"}
+    """
+    result: dict[str, str] = {}
+    # Strip the self#jumbf= prefix
+    path = uri
+    if "#jumbf=" in uri:
+        path = uri.split("#jumbf=", 1)[1]
+    parts = path.strip("/").split("/")
+    # Expected: c2pa / manifest-label / c2pa.assertions / assertion-label
+    if len(parts) >= 2:
+        result["target_manifest"] = parts[1]
+    if len(parts) >= 4:
+        result["target_assertion"] = parts[3]
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -345,6 +514,20 @@ _SUPPORTED_EXTENSIONS = frozenset(
 )
 
 
+def _load_known_failures(path: Path | None) -> dict[str, str]:
+    """Load a known-failures JSON file mapping filenames to reasons.
+
+    Format: {"filename.ext": "reason string", ...}
+    """
+    if path is None:
+        return {}
+    with path.open() as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        return {}
+    return {str(k): str(v) for k, v in data.items()}
+
+
 @cli.command("suite")
 @click.argument("directory", type=click.Path(exists=True, file_okay=False, path_type=Path))
 @click.option("--predicates", type=click.Path(exists=True, path_type=Path))
@@ -352,6 +535,12 @@ _SUPPORTED_EXTENSIONS = frozenset(
 @click.option("--output", type=click.Path(path_type=Path), default=None, help="Write JSON report.")
 @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
 @click.option("--fail-fast", is_flag=True, help="Stop on first failure.")
+@click.option(
+    "--known-failures",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help='JSON file mapping filenames to expected-failure reasons (e.g. {"file.jpg": "reason"}).',
+)
 def suite(
     directory: Path,
     predicates: Path | None,
@@ -359,9 +548,12 @@ def suite(
     output: Path | None,
     fmt: str,
     fail_fast: bool,
+    known_failures: Path | None,
 ) -> None:
     """Validate all assets in a directory against conformance predicates."""
     from c2pa_conformance.evaluator.engine import PredicateEngine
+
+    known = _load_known_failures(known_failures)
 
     # Find all supported files first so we can exit early without needing predicates
     files = sorted(
@@ -389,22 +581,51 @@ def suite(
     all_reports: list[dict] = []
     total_pass = 0
     total_fail = 0
+    total_xfail = 0
+    total_xpass = 0
     errors = 0
 
     for asset_path in files:
         try:
             report, _ = _run_validation_pipeline(asset_path, engine, trust_store)
-            all_reports.append(report.to_dict())
-            total_pass += report.pass_count
-            total_fail += report.fail_count
+            report_dict = report.to_dict()
+            is_known = asset_path.name in known
 
-            if fmt == "text":
-                status = "PASS" if report.fail_count == 0 else "FAIL"
-                click.echo(
-                    f"  [{status}] {asset_path.name}: {report.pass_count}P/{report.fail_count}F"
-                )
+            if report.fail_count == 0 and is_known:
+                # Expected to fail but passed - unexpected pass
+                total_xpass += 1
+                total_pass += report.pass_count
+                report_dict["xpass"] = True
+                report_dict["known_failure_reason"] = known[asset_path.name]
+                if fmt == "text":
+                    click.echo(
+                        f"  [XPASS] {asset_path.name}: {report.pass_count}P/{report.fail_count}F"
+                        f" (expected failure: {known[asset_path.name]})"
+                    )
+            elif report.fail_count > 0 and is_known:
+                # Expected failure - xfail
+                total_xfail += 1
+                total_pass += report.pass_count
+                report_dict["xfail"] = True
+                report_dict["known_failure_reason"] = known[asset_path.name]
+                if fmt == "text":
+                    click.echo(
+                        f"  [XFAIL] {asset_path.name}: {report.pass_count}P/{report.fail_count}F"
+                        f" ({known[asset_path.name]})"
+                    )
+            else:
+                total_pass += report.pass_count
+                total_fail += report.fail_count
+                if fmt == "text":
+                    status = "PASS" if report.fail_count == 0 else "FAIL"
+                    click.echo(
+                        f"  [{status}] {asset_path.name}:"
+                        f" {report.pass_count}P/{report.fail_count}F"
+                    )
 
-            if fail_fast and report.fail_count > 0:
+            all_reports.append(report_dict)
+
+            if fail_fast and report.fail_count > 0 and not is_known:
                 click.echo("Stopping (--fail-fast)")
                 break
         except Exception as exc:
@@ -415,9 +636,14 @@ def suite(
             if fail_fast:
                 break
 
-    click.echo(
-        f"\nSummary: {len(files)} files, {total_pass} pass, {total_fail} fail, {errors} errors"
-    )
+    # Build summary line
+    parts = [f"{len(files)} files", f"{total_pass} pass", f"{total_fail} fail"]
+    if total_xfail:
+        parts.append(f"{total_xfail} xfail")
+    if total_xpass:
+        parts.append(f"{total_xpass} xpass")
+    parts.append(f"{errors} errors")
+    click.echo(f"\nSummary: {', '.join(parts)}")
 
     if output:
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -429,6 +655,8 @@ def suite(
                         "total_files": len(files),
                         "total_pass": total_pass,
                         "total_fail": total_fail,
+                        "total_xfail": total_xfail,
+                        "total_xpass": total_xpass,
                         "errors": errors,
                     },
                 },

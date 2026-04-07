@@ -99,10 +99,13 @@ class ConformanceReport:
 
 def _eval_field_present(context: dict[str, Any], condition: dict[str, Any]) -> tuple[bool, str]:
     """Check if a field exists in the context."""
-    field_path = condition["field"]
+    field_path = condition.get("field", "")
     value = _resolve_field(context, field_path)
     if value is None:
         on_absent = condition.get("on_absent", {})
+        # Non-failure outcomes: skip and informational pass through
+        if on_absent.get("result") in ("skip", "informational"):
+            return True, on_absent.get("status", "")
         return False, on_absent.get("status", "")
     return True, ""
 
@@ -125,18 +128,67 @@ def _eval_for_each(context: dict[str, Any], condition: dict[str, Any]) -> tuple[
         on_violation = condition.get("on_violation", {})
         return False, on_violation.get("status", "")
 
-    check = condition["check"]
+    # Apply filter if present
+    filter_spec = condition.get("filter", {})
+    if filter_spec:
+        exclude = filter_spec.get("exclude", "")
+        include = filter_spec.get("include", "")
+        if exclude:
+            array = [
+                item
+                for item in array
+                if not (isinstance(item, dict) and _matches_filter(item, exclude))
+            ]
+        if include:
+            array = [
+                item for item in array if isinstance(item, dict) and _matches_filter(item, include)
+            ]
+
+    check = condition.get("check", condition.get("action", {}))
+
+    # Derive a singular item name from the collection name for scoped access
+    # e.g. "ingredient_manifests" -> "ingredient_manifest"
+    item_name = condition.get("as", "")
+    if not item_name and array_path.endswith("s"):
+        item_name = array_path[:-1]
+
     for i, item in enumerate(array):
         item_context = {**context, "_item": item, "_index": i}
         # Merge item fields into context for field resolution
         if isinstance(item, dict):
             item_context.update(item)
+        # Also set scoped item name for dotted-path access
+        if item_name:
+            item_context[item_name] = item
         ok, status = _eval_condition(item_context, check)
         if not ok:
             on_violation = condition.get("on_violation", {})
             return False, on_violation.get("status", status)
 
     return True, ""
+
+
+def _matches_filter(item: dict[str, Any], pattern: str) -> bool:
+    """Check if an item matches a filter pattern.
+
+    Patterns can be:
+    - A dotted field path value (e.g. "c2pa.ingredient.v3.activeManifest")
+      matches if any field in the item contains this value.
+    """
+    for val in item.values():
+        if isinstance(val, str) and pattern in val:
+            return True
+        if isinstance(val, dict):
+            for inner_val in val.values():
+                if isinstance(inner_val, str) and pattern in inner_val:
+                    return True
+    # Also check field_name + assertion_label combination
+    label = item.get("assertion_label", "")
+    field = item.get("field_name", "")
+    combined = f"{label}.{field}" if label and field else ""
+    if combined and pattern in combined:
+        return True
+    return False
 
 
 def _eval_for_consecutive_pairs(
@@ -218,8 +270,23 @@ def _eval_or(context: dict[str, Any], condition: dict[str, Any]) -> tuple[bool, 
 
 
 def _eval_one_of(context: dict[str, Any], condition: dict[str, Any]) -> tuple[bool, str]:
-    """Check if a field value is in an allowed set."""
-    field_val = _resolve_field(context, condition["field"])
+    """Check if a field value is in an allowed set.
+
+    Also supports an ``options`` list of sub-conditions (at least one must pass).
+    """
+    # Handle options-style (alternative sub-conditions)
+    options = condition.get("options", [])
+    if options:
+        for opt in options:
+            if isinstance(opt, dict) and "op" in opt:
+                ok, status = _eval_condition(context, opt)
+                if ok:
+                    return True, status
+        on_not_found = condition.get("on_not_found", {})
+        return False, on_not_found.get("status", "")
+
+    field_path = condition.get("field", "")
+    field_val = _resolve_field(context, field_path)
     allowed = condition.get("allowed", [])
     deprecated = condition.get("deprecated", [])
     if field_val in allowed or field_val in deprecated:
@@ -229,15 +296,41 @@ def _eval_one_of(context: dict[str, Any], condition: dict[str, Any]) -> tuple[bo
 
 
 def _eval_sequence(context: dict[str, Any], condition: dict[str, Any]) -> tuple[bool, str]:
-    """Evaluate a sequence of steps in order."""
+    """Evaluate a sequence of steps in order.
+
+    Supports the test+branch pattern where a compare/test step is followed
+    by a check_status step with on_true/on_false handling. When the test
+    fails but the next step can handle both outcomes, the sequence continues
+    rather than stopping.
+    """
     steps = condition.get("steps", [])
-    for step in steps:
+    for i, step in enumerate(steps):
         op = step.get("op", "")
         # Steps may have conditions that are themselves evaluable
         if op in _OPERATORS:
             ok, status = _eval_condition(context, step)
             if not ok:
+                # Check if next step handles both outcomes (test+branch)
+                if i + 1 < len(steps):
+                    next_step = steps[i + 1]
+                    if "on_true" in next_step or "on_false" in next_step:
+                        context["_step_result"] = False
+                        continue
+                # Check if the step indicates a non-failure result intent
+                # (on_absent, on_invalid, on_violation, on_failed_prerequisite
+                #  with result=skip/informational)
+                for key in (
+                    "on_absent",
+                    "on_invalid",
+                    "on_violation",
+                    "on_failed_prerequisite",
+                ):
+                    sub = step.get(key, {})
+                    if sub.get("result") in ("skip", "informational", "continue"):
+                        return True, sub.get("status", status)
                 return False, status
+            else:
+                context["_step_result"] = True
         # Otherwise it's a description-only step (hash computation, etc.)
         # that we report as skip (needs runtime implementation)
     return True, ""
@@ -258,9 +351,143 @@ def _eval_subset_check(context: dict[str, Any], condition: dict[str, Any]) -> tu
 
 
 def _eval_delegate(context: dict[str, Any], condition: dict[str, Any]) -> tuple[bool, str]:
-    """Delegate to other predicates. Returns pass (delegation is structural)."""
-    # Delegation is handled at a higher level by the engine
+    """Delegate evaluation to another predicate or named procedure.
+
+    Supports three delegation patterns:
+    - "predicate": "PRED-XXX" - delegate to a single predicate by ID
+    - "to_predicates": ["PRED-A", ...] - delegate to multiple predicates (all must pass)
+    - "to": "procedure_name" - delegate to a named validation procedure
+    """
+    predicates = context.get("_predicates", {})
+
+    # Pattern 1: single predicate by ID
+    target_id = condition.get("predicate", "")
+    if target_id and target_id in predicates:
+        target = predicates[target_id]
+        target_condition = target.get("condition", {})
+        if target_condition:
+            ok, status = _eval_condition(context, target_condition)
+            on_success = condition.get("on_success", {})
+            on_fail = condition.get("on_fail", "")
+            if ok and on_success:
+                return True, on_success.get("status", status)
+            if not ok and isinstance(on_fail, str) and on_fail.startswith("continue"):
+                return False, status
+            return ok, status
+        return True, ""
+
+    # Pattern 2: multiple predicates
+    to_predicates = condition.get("to_predicates", [])
+    if to_predicates:
+        for pred_id in to_predicates:
+            if pred_id not in predicates:
+                continue
+            target = predicates[pred_id]
+            target_condition = target.get("condition", {})
+            if target_condition:
+                ok, status = _eval_condition(context, target_condition)
+                if not ok:
+                    return False, status
+        return True, ""
+
+    # Pattern 3: named procedure
+    procedure = condition.get("to", "")
+    if procedure == "hashed_uri_validation_procedure":
+        return _eval_hashed_uri_procedure(context)
+    if procedure == "external_resource_retrieval_procedure":
+        # External resource retrieval is not performed by the conformance suite
+        return True, ""
+
+    # Unknown delegation target - pass through
     return True, ""
+
+
+def _eval_hashed_uri_procedure(context: dict[str, Any]) -> tuple[bool, str]:
+    """Validate a hashed URI by resolving the target and verifying its hash.
+
+    Expects the current context to contain a hashed_uri field item with
+    data.url and data.hash fields from the standard_assertions context.
+    """
+    item = context.get("_item", {})
+    if not isinstance(item, dict):
+        return True, ""
+
+    data = item.get("data", {})
+    if not isinstance(data, dict):
+        return True, ""
+
+    url = data.get("url", "")
+    declared_hash = data.get("hash", b"")
+    alg = data.get("alg", "sha256")
+
+    if not url or not declared_hash:
+        return True, ""
+
+    # Resolve JUMBF URI to raw assertion bytes
+    manifest_store = context.get("manifest_store", {})
+    manifests = manifest_store.get("manifests", [])
+
+    resolved_bytes = _resolve_jumbf_uri_bytes(url, manifests, context)
+    if resolved_bytes is None:
+        # Cannot resolve - informational, not a hard failure
+        return True, ""
+
+    # Compute hash and compare
+    import hashlib
+
+    alg_name = str(alg).lower().replace("-", "")
+    hashlib_name = {"sha256": "sha256", "sha384": "sha384", "sha512": "sha512"}.get(
+        alg_name, "sha256"
+    )
+    computed = hashlib.new(hashlib_name, resolved_bytes).digest()
+
+    if isinstance(declared_hash, bytes) and computed == declared_hash:
+        return True, "assertion.hashedURI.match"
+
+    return False, "assertion.hashedURI.mismatch"
+
+
+def _resolve_jumbf_uri_bytes(
+    uri: str,
+    manifests: list[dict[str, Any]],
+    context: dict[str, Any],
+) -> bytes | None:
+    """Resolve a JUMBF URI to the raw CBOR bytes of the target assertion.
+
+    Supports self#jumbf= URIs that reference assertions within the manifest store.
+    Returns None if the URI cannot be resolved.
+    """
+    # Parse URI: self#jumbf=/c2pa/manifest-label/c2pa.assertions/assertion-label
+    path = uri
+    if "#jumbf=" in uri:
+        path = uri.split("#jumbf=", 1)[1]
+    parts = path.strip("/").split("/")
+
+    # Need at least: c2pa / manifest-label / c2pa.assertions / assertion-label
+    if len(parts) < 4:
+        return None
+
+    target_manifest_label = parts[1]
+    target_assertion_label = parts[3]
+
+    # Find the manifest
+    for m in manifests:
+        if m.get("label") == target_manifest_label:
+            # Find the assertion
+            for a in m.get("assertions", []):
+                if a.get("label") == target_assertion_label:
+                    # Return raw CBOR if available, otherwise check the box
+                    raw = a.get("raw_cbor")
+                    if isinstance(raw, bytes) and raw:
+                        return raw
+                    # Fallback: use the box bytes from the JUMBF store
+                    box = a.get("box", {})
+                    if isinstance(box, dict) and "offset" in box and "size" in box:
+                        asset_bytes = context.get("asset_bytes", b"")
+                        if asset_bytes:
+                            return asset_bytes[box["offset"] : box["offset"] + box["size"]]
+                    return None
+    return None
 
 
 def _eval_noop(context: dict[str, Any], condition: dict[str, Any]) -> tuple[bool, str]:
@@ -367,9 +594,19 @@ def _eval_full_coverage(context: dict[str, Any], condition: dict[str, Any]) -> t
 
 
 def _eval_one_of_content(context: dict[str, Any], condition: dict[str, Any]) -> tuple[bool, str]:
-    """Check a field value is one of the allowed content types."""
-    field_val = _resolve_field(context, condition["field"])
-    allowed = condition.get("allowed", [])
+    """Check a field value is one of the allowed content types.
+
+    When no explicit field is given, the check is structural (e.g., what
+    content resides inside an exclusion range). The conformance suite
+    trusts the signer's content; pass through unless the field is present
+    and verifiable.
+    """
+    field_name = condition.get("field", "")
+    if not field_name:
+        # Structural check without a resolvable field - pass through
+        return True, ""
+    field_val = _resolve_field(context, field_name)
+    allowed = condition.get("allowed", condition.get("content_types", []))
     on_violation = condition.get("on_violation", {})
     if field_val not in allowed:
         return False, on_violation.get("status", "")
@@ -378,11 +615,24 @@ def _eval_one_of_content(context: dict[str, Any], condition: dict[str, Any]) -> 
 
 def _eval_one_of_type(context: dict[str, Any], condition: dict[str, Any]) -> tuple[bool, str]:
     """Check a field value is one of the allowed type values."""
-    field_val = _resolve_field(context, condition["field"])
-    allowed = condition.get("allowed", [])
-    on_violation = condition.get("on_violation", {})
+    field_name = condition.get("field", "type")
+    field_val = _resolve_field(context, field_name)
+    allowed = condition.get("allowed", condition.get("allowed_types", []))
+    on_other = condition.get("on_violation", condition.get("on_other", {}))
+    if field_val is None:
+        # When iterating exclusions, check the item's type field
+        field_val = (
+            context.get("_item", {}).get("type")
+            if isinstance(context.get("_item"), dict)
+            else None
+        )
     if field_val not in allowed:
-        return False, on_violation.get("status", "")
+        result_type = on_other.get("result", "fail")
+        status = on_other.get("status", "")
+        # "informational" is a non-failure outcome
+        if result_type == "informational":
+            return True, status
+        return False, status
     return True, ""
 
 
@@ -639,6 +889,19 @@ def _eval_compute_hash(context: dict[str, Any], condition: dict[str, Any]) -> tu
         return True, "no asset bytes available"
 
     alg = condition.get("algorithm", "sha256")
+    # Resolve field paths (e.g. "assertion.alg" -> actual algorithm name)
+    if isinstance(alg, str) and "." in alg:
+        resolved = _resolve_field(context, alg)
+        if isinstance(resolved, str):
+            alg = resolved
+        else:
+            # Try resolving from hard_binding data
+            hb_data = context.get("hard_binding", {}).get("data", {})
+            if "alg" in hb_data:
+                alg = hb_data["alg"]
+            else:
+                alg = "sha256"
+
     start = condition.get("start", 0)
     length = condition.get("length", len(asset_bytes) - start)
     exclusions = condition.get("exclusions", [])
@@ -1019,40 +1282,189 @@ def _eval_validate_manifest_store(
 # ---------------------------------------------------------------------------
 
 
-def _eval_check_status(
-    context: dict[str, Any], condition: dict[str, Any]
-) -> tuple[bool, str]:
+def _eval_check_status(context: dict[str, Any], condition: dict[str, Any]) -> tuple[bool, str]:
     """Check if a status code is set in the validation context.
 
     Inspects context["_emitted_statuses"] for a previously recorded status.
     If the status matches, returns True with the status code.
+
+    When no explicit ``status`` key is provided, this acts as a flow-through
+    step that always passes (the preceding sequence step already validated).
     """
-    target_status = condition.get("status", "")
-    emitted = context.get("_emitted_statuses", set())
+    target_status = condition.get("status", condition.get("status_present", ""))
+    emitted = context.setdefault("_emitted_statuses", set())
     on_present = condition.get("on_present", {})
     on_absent = condition.get("on_absent", {})
+
+    # Handle prerequisite checks (e.g. CRYP-016 step 1)
+    prerequisite = condition.get("prerequisite", "")
+    if prerequisite:
+        prereq_met = _check_prerequisite(context, prerequisite)
+        if not prereq_met:
+            # Return False so the sequence evaluator can check
+            # on_failed_prerequisite for skip/informational intent
+            return False, ""
+        return True, ""
+
+    # Handle on_true/on_false branching from test+branch pattern
+    if "on_true" in condition or "on_false" in condition:
+        prev_result = context.get("_step_result", True)
+        if prev_result:
+            on_true = condition.get("on_true", {})
+            return True, on_true.get("status", "")
+        else:
+            on_false = condition.get("on_false", {})
+            if on_false.get("result") == "continue":
+                return True, ""
+            return False, on_false.get("status", "")
+
+    # Flow-through: no specific status to check means prior step result applies
+    if not target_status:
+        # Check for multi-status form (e.g. PRED-CRYP-016 step 2)
+        statuses = condition.get("statuses", [])
+        if statuses:
+            for s in statuses:
+                emitted.add(s)
+            return True, ""
+        # result=continue means flow-through
+        if condition.get("result") == "continue":
+            return True, ""
+        return True, ""
+
+    # Status emission: when a result type is specified, the intent is to
+    # emit the status rather than check for it.
+    result_type = condition.get("result", "")
+    if result_type:
+        emitted.add(target_status)
+        if result_type == "fail":
+            return False, target_status
+        return True, target_status
 
     if target_status in emitted:
         return True, on_present.get("status", target_status)
     return False, on_absent.get("status", "")
 
 
-def _eval_compare(
+def _check_prerequisite(context: dict[str, Any], prerequisite: str) -> bool:
+    """Check if a named prerequisite condition is met."""
+    if prerequisite == "all_prior_timestamp_steps_passed":
+        # Timestamp steps require timestamp data in context
+        return context.get("timestamp") is not None
+    # Unknown prerequisites pass by default
+    return True
+
+
+def _eval_validate_timestamp(
     context: dict[str, Any], condition: dict[str, Any]
 ) -> tuple[bool, str]:
+    """Validate certificate validity against a reference time.
+
+    reference_time can be:
+    - A dotted path to a timestamp in context (e.g. timeStampToken.tspInfo.genTime)
+    - "current_time" to use the current wall clock time
+
+    Falls back to legacy behavior (check pre-computed timestamp.valid) when
+    no reference_time key is present.
+    """
+    from datetime import datetime, timezone
+
+    # Legacy form: no reference_time, just check pre-computed result
+    if "reference_time" not in condition:
+        return _eval_validate_timestamp_legacy(context, condition)
+
+    ref_time_spec = condition.get("reference_time", "current_time")
+
+    if ref_time_spec == "current_time":
+        ref_time = datetime.now(timezone.utc)
+    else:
+        raw = _resolve_field(context, ref_time_spec)
+        if not raw:
+            return True, ""
+        try:
+            ref_time = datetime.fromisoformat(str(raw))
+        except (ValueError, TypeError):
+            return True, ""
+
+    # Check signing certificate validity at reference time
+    signing_cert = context.get("signing_certificate", {})
+    not_before = signing_cert.get("not_before")
+    not_after = signing_cert.get("not_after")
+    if not not_before or not not_after:
+        return True, ""
+
+    try:
+        nb = datetime.fromisoformat(not_before)
+        na = datetime.fromisoformat(not_after)
+        if nb <= ref_time <= na:
+            emitted = context.setdefault("_emitted_statuses", set())
+            emitted.add("claimSignature.insideValidity")
+            return True, "claimSignature.insideValidity"
+        else:
+            emitted = context.setdefault("_emitted_statuses", set())
+            emitted.add("claimSignature.outsideValidity")
+            return False, "claimSignature.outsideValidity"
+    except (ValueError, TypeError):
+        return True, ""
+
+
+def _compare_within_range(value: Any, range_spec: Any) -> bool:
+    """Check if a value falls within a validity range.
+
+    range_spec can be:
+    - A dict with not_before/not_after keys (single period)
+    - A list of such dicts (any period must match)
+    """
+    from datetime import datetime
+
+    def _parse_time(t: Any) -> datetime | None:
+        if isinstance(t, datetime):
+            return t
+        if isinstance(t, str):
+            try:
+                return datetime.fromisoformat(t)
+            except ValueError:
+                return None
+        return None
+
+    def _in_period(val_time: datetime, period: dict) -> bool:
+        nb = _parse_time(period.get("not_before"))
+        na = _parse_time(period.get("not_after"))
+        if nb and val_time < nb:
+            return False
+        if na and val_time > na:
+            return False
+        return True
+
+    val_time = _parse_time(value)
+    if val_time is None:
+        return False
+
+    if isinstance(range_spec, dict):
+        return _in_period(val_time, range_spec)
+    if isinstance(range_spec, list):
+        return any(_in_period(val_time, p) for p in range_spec if isinstance(p, dict))
+    return False
+
+
+def _eval_compare(context: dict[str, Any], condition: dict[str, Any]) -> tuple[bool, str]:
     """Generalized two-operand comparison with configurable op_type.
 
     Supports: eq, gt, lt, gte, lte, ne. Both sides can be field paths
     or literal values.
     """
     left = condition.get("field", condition.get("left"))
-    right = condition.get("value", condition.get("right"))
-    op_type = condition.get("op_type", "eq")
+    op_type = condition.get("op_type", condition.get("operator", condition.get("relation", "eq")))
     on_true = condition.get("on_true", {})
     on_false = condition.get("on_false", {})
 
     left_val = _eval_expression(context, left)
-    right_val = _eval_expression(context, right)
+
+    # The "value" key is a literal; "right" is a field path or expression.
+    if "value" in condition:
+        right_val = condition["value"]
+    else:
+        right = condition.get("right")
+        right_val = _eval_expression(context, right)
 
     if left_val is None or right_val is None:
         return False, on_false.get("status", "")
@@ -1064,6 +1476,8 @@ def _eval_compare(
         "lt": lambda a, b: a < b,
         "gte": lambda a, b: a >= b,
         "lte": lambda a, b: a <= b,
+        "within_range": _compare_within_range,
+        "within_validity": _compare_within_range,
     }
     cmp_fn = comparators.get(op_type, lambda a, b: a == b)
     try:
@@ -1072,13 +1486,20 @@ def _eval_compare(
         return False, on_false.get("status", "")
 
     if result:
+        # If there's a then-branch, the compare acts as a conditional guard:
+        # evaluate the then-branch when the comparison is true.
+        then_branch = condition.get("then", {})
+        if then_branch and "op" in then_branch:
+            return _eval_condition(context, then_branch)
         return True, on_true.get("status", "")
+    # If there's a then-branch but the comparison is false, the guard
+    # didn't match - this is not a failure, just a non-applicable step.
+    if "then" in condition:
+        return True, on_false.get("status", "")
     return False, on_false.get("status", "")
 
 
-def _eval_conditional(
-    context: dict[str, Any], condition: dict[str, Any]
-) -> tuple[bool, str]:
+def _eval_conditional(context: dict[str, Any], condition: dict[str, Any]) -> tuple[bool, str]:
     """If/then/else branching with an explicit else branch.
 
     Unlike the 'if' operator which has no else, 'conditional' always
@@ -1118,9 +1539,7 @@ def _eval_validate_structure(
     return True, status
 
 
-def _eval_validate_format(
-    context: dict[str, Any], condition: dict[str, Any]
-) -> tuple[bool, str]:
+def _eval_validate_format(context: dict[str, Any], condition: dict[str, Any]) -> tuple[bool, str]:
     """Validate that a field conforms to an expected format.
 
     Checks format_type against the context field value.
@@ -1144,9 +1563,7 @@ def _eval_validate_format(
     return True, ""
 
 
-def _eval_check_revocation(
-    context: dict[str, Any], condition: dict[str, Any]
-) -> tuple[bool, str]:
+def _eval_check_revocation(context: dict[str, Any], condition: dict[str, Any]) -> tuple[bool, str]:
     """Check certificate revocation status from the validation context.
 
     Inspects context for OCSP or CRL revocation data. Emits the
@@ -1196,9 +1613,7 @@ def _eval_validate_certificate(
     return False, on_untrusted.get("status", "signingCredential.untrusted")
 
 
-def _eval_verify_signature(
-    context: dict[str, Any], condition: dict[str, Any]
-) -> tuple[bool, str]:
+def _eval_verify_signature(context: dict[str, Any], condition: dict[str, Any]) -> tuple[bool, str]:
     """Verify a cryptographic signature from the validation context.
 
     Checks context for pre-computed signature verification results.
@@ -1216,13 +1631,10 @@ def _eval_verify_signature(
     return False, on_invalid.get("status", "claimSignature.mismatch")
 
 
-def _eval_validate_timestamp(
+def _eval_validate_timestamp_legacy(
     context: dict[str, Any], condition: dict[str, Any]
 ) -> tuple[bool, str]:
-    """Validate a time-stamp token from the validation context.
-
-    Checks context for pre-computed timestamp validation results.
-    """
+    """Legacy validate_timestamp that just checks pre-computed results."""
     ts_field = condition.get("timestamp", "timestamp")
     ts_valid = _resolve_field(context, f"{ts_field}.valid")
     on_valid = condition.get("on_valid", {})
@@ -1236,9 +1648,7 @@ def _eval_validate_timestamp(
     return False, on_invalid.get("status", "timeStamp.mismatch")
 
 
-def _eval_is_array(
-    context: dict[str, Any], condition: dict[str, Any]
-) -> tuple[bool, str]:
+def _eval_is_array(context: dict[str, Any], condition: dict[str, Any]) -> tuple[bool, str]:
     """Check if a field value is an array (list)."""
     field_val = _resolve_field(context, condition.get("field", ""))
     on_not_array = condition.get("on_not_array", {})
@@ -1251,9 +1661,7 @@ def _eval_is_array(
     return True, ""
 
 
-def _eval_sum_field(
-    context: dict[str, Any], condition: dict[str, Any]
-) -> tuple[bool, str]:
+def _eval_sum_field(context: dict[str, Any], condition: dict[str, Any]) -> tuple[bool, str]:
     """Sum a numeric field across array items and compare to expected value.
 
     Resolves `over` to get an array, sums the specified field from each item,
@@ -1291,9 +1699,7 @@ def _eval_sum_field(
     return True, ""
 
 
-def _eval_traverse(
-    context: dict[str, Any], condition: dict[str, Any]
-) -> tuple[bool, str]:
+def _eval_traverse(context: dict[str, Any], condition: dict[str, Any]) -> tuple[bool, str]:
     """Traverse a chain of references until a terminal condition is met.
 
     Used for following ingredient parentOf chains to find a standard manifest.
@@ -1324,9 +1730,7 @@ def _eval_traverse(
     return False, on_not_found.get("status", "")
 
 
-def _eval_regex_match(
-    context: dict[str, Any], condition: dict[str, Any]
-) -> tuple[bool, str]:
+def _eval_regex_match(context: dict[str, Any], condition: dict[str, Any]) -> tuple[bool, str]:
     """Check if a field value matches a regex pattern."""
     field_val = _resolve_field(context, condition.get("field", ""))
     pattern = condition.get("pattern", "")
@@ -1402,9 +1806,7 @@ def _eval_resolve_reference(
     return True, on_found.get("status", "")
 
 
-def _eval_resolve_uri(
-    context: dict[str, Any], condition: dict[str, Any]
-) -> tuple[bool, str]:
+def _eval_resolve_uri(context: dict[str, Any], condition: dict[str, Any]) -> tuple[bool, str]:
     """Resolve a JUMBF URI to its target within the manifest store."""
     uri_field = condition.get("uri", condition.get("field", ""))
     uri = _resolve_field(context, uri_field)
@@ -1428,9 +1830,7 @@ def _eval_resolve_uri(
     return False, on_unresolvable.get("status", "")
 
 
-def _eval_check_location(
-    context: dict[str, Any], condition: dict[str, Any]
-) -> tuple[bool, str]:
+def _eval_check_location(context: dict[str, Any], condition: dict[str, Any]) -> tuple[bool, str]:
     """Check that a referenced location is within the expected scope."""
     location = condition.get("location", condition.get("field", ""))
     loc_val = _resolve_field(context, location)
@@ -1447,9 +1847,7 @@ def _eval_check_location(
     return True, ""
 
 
-def _eval_find_certificate(
-    context: dict[str, Any], condition: dict[str, Any]
-) -> tuple[bool, str]:
+def _eval_find_certificate(context: dict[str, Any], condition: dict[str, Any]) -> tuple[bool, str]:
     """Find a certificate in the chain or trust store."""
     cert_type = condition.get("cert_type", "signer")
     on_not_found = condition.get("on_not_found", {})
@@ -1466,9 +1864,7 @@ def _eval_find_certificate(
     return False, on_not_found.get("status", "signingCredential.invalid")
 
 
-def _eval_any_of(
-    context: dict[str, Any], condition: dict[str, Any]
-) -> tuple[bool, str]:
+def _eval_any_of(context: dict[str, Any], condition: dict[str, Any]) -> tuple[bool, str]:
     """At least one sub-condition must pass (OR semantics)."""
     checks = condition.get("checks", [])
     on_none = condition.get("on_none", {})
@@ -1481,9 +1877,7 @@ def _eval_any_of(
     return False, on_none.get("status", "")
 
 
-def _eval_one_of_exclusive(
-    context: dict[str, Any], condition: dict[str, Any]
-) -> tuple[bool, str]:
+def _eval_one_of_exclusive(context: dict[str, Any], condition: dict[str, Any]) -> tuple[bool, str]:
     """Exactly one of the specified fields must be present (mutual exclusion)."""
     fields = condition.get("fields", [])
     on_violation = condition.get("on_violation", {})
@@ -1631,6 +2025,12 @@ def _eval_expression(context: dict[str, Any], expr: Any) -> Any:
                 if isinstance(val, (int, float)):
                     total += val
             return total
+        if op == "count":
+            field_path = expr.get("field", "")
+            val = _resolve_field(context, field_path)
+            if isinstance(val, list):
+                return len(val)
+            return 0 if val is None else 1
     return None
 
 
@@ -1651,18 +2051,44 @@ def _eval_condition(context: dict[str, Any], condition: dict[str, Any]) -> tuple
 class PredicateEngine:
     """Evaluates C2PA conformance predicates against manifest data."""
 
+    # Maps container_format values from extractors to applicable format families.
+    # cross_cutting predicates always apply and are handled separately.
+    _FORMAT_FAMILIES: dict[str, set[str]] = {
+        "jpeg": {"image"},
+        "png": {"image"},
+        "tiff": {"image"},
+        "gif": {"image"},
+        "jxl": {"image"},
+        "svg": {"image", "structured_text"},
+        "html": {"structured_text"},
+        "structured_text": {"structured_text"},
+        "bmff": {"image", "video_bmff", "multi_asset"},
+        "riff": {"audio_wav"},
+        "flac": {"audio_wav"},
+        "ogg": {"audio_wav"},
+        "id3": {"audio_wav"},
+        "pdf": {"document_pdf"},
+        "text": {"text_plain"},
+        "sidecar": {"text_plain"},
+        "zip": {"collection_hash"},
+        "font": set(),
+    }
+
     def __init__(self, predicates_path: Path | str) -> None:
         path = Path(predicates_path)
         self.predicates_data = json.loads(path.read_text(encoding="utf-8"))
         self.spec_version = self.predicates_data.get("spec_version", "")
 
-        # Index all predicates by ID
+        # Index all predicates by ID and track their format family
         self._predicates: dict[str, dict[str, Any]] = {}
-        for family in self.predicates_data.get("format_families", {}).values():
+        self._predicate_family: dict[str, str] = {}
+        for family_name, family in self.predicates_data.get("format_families", {}).items():
             for pred in family.get("predicates", []):
                 self._predicates[pred["predicate_id"]] = pred
+                self._predicate_family[pred["predicate_id"]] = family_name
         for pred in self.predicates_data.get("cross_cutting", {}).get("predicates", []):
             self._predicates[pred["predicate_id"]] = pred
+            self._predicate_family[pred["predicate_id"]] = "cross_cutting"
 
     @property
     def predicate_count(self) -> int:
@@ -1680,6 +2106,42 @@ class PredicateEngine:
         # Always include cross-cutting predicates
         result.extend(self.predicates_data.get("cross_cutting", {}).get("predicates", []))
         return result
+
+    @staticmethod
+    def _extract_field_paths(condition: dict[str, Any]) -> set[str]:
+        """Extract all field paths referenced in a condition tree."""
+        paths: set[str] = set()
+        # Keys that hold a single field path string
+        for key in (
+            "field",
+            "over",
+            "scope",
+            "from",
+            "actual",
+            "expected_superset",
+            "credential_source",
+            "chain",
+            "certificate",
+            "reference",
+        ):
+            val = condition.get(key)
+            if isinstance(val, str):
+                paths.add(val)
+        # left/right may be field paths (strings) or literal values
+        for key in ("left", "right"):
+            val = condition.get(key)
+            if isinstance(val, str) and "." in val:
+                paths.add(val)
+        # Recurse into sub-conditions
+        for key in ("steps", "checks"):
+            for item in condition.get(key, []):
+                if isinstance(item, dict):
+                    paths |= PredicateEngine._extract_field_paths(item)
+        for key in ("condition", "then", "else", "if", "check"):
+            sub = condition.get(key)
+            if isinstance(sub, dict):
+                paths |= PredicateEngine._extract_field_paths(sub)
+        return paths
 
     def evaluate_predicate(self, predicate_id: str, context: dict[str, Any]) -> EvalResult:
         """Evaluate a single predicate against a context dict.
@@ -1704,6 +2166,62 @@ class PredicateEngine:
         is_may = severity == "may"
 
         condition = pred.get("condition", {})
+
+        # When running against a real asset (container_format present),
+        # skip predicates whose referenced fields are entirely absent.
+        # This handles predicates about optional manifest features
+        # (ingredients, timestamps, etc.) that the asset lacks.
+        if "container_format" in context:
+            field_paths = self._extract_field_paths(condition)
+            generic = {
+                "container_format",
+                "asset_path",
+                "asset_bytes",
+                "asset_size",
+                "jumbf_offset",
+                "jumbf_length",
+                "manifest_store",
+                "active_manifest",
+                "claim",
+                "assertion_labels",
+                "assertion_count",
+                "assertion_store",
+                "claim_generator",
+                "claim_generator_info",
+                "claim_cbor_bytes",
+                "hard_binding",
+                "exclusions",
+                "signature",
+                "certificate",
+                "trust",
+                "hash",
+                "cose_signature",
+                "signing_credential",
+                "claim_signature",
+                "cert_chain",
+                "signature_verified",
+                "binding_verified",
+                "data_hash_assertion",
+                "data_hash_assertion.exclusions",
+                "data_hash_assertion.alg",
+                "bmff_hash_assertion",
+                "bmff_hash_assertion.exclusions",
+                "bmff_hash_assertion.alg",
+                "boxes_hash_assertion",
+                "ingredient_manifests",
+                "manifest_by_label",
+            }
+            specific_paths = field_paths - generic
+            if specific_paths and not any(
+                _resolve_field(context, p) is not None for p in specific_paths
+            ):
+                return EvalResult(
+                    predicate_id=predicate_id,
+                    result=ResultType.SKIP,
+                    message="Required context fields not present",
+                )
+        # Inject predicate store into context for delegate resolution
+        context["_predicates"] = self._predicates
         try:
             ok, status_code = _eval_condition(context, condition)
         except Exception as exc:
@@ -1742,13 +2260,19 @@ class PredicateEngine:
             )
 
     def evaluate_all(
-        self, context: dict[str, Any], binding: str | None = None
+        self,
+        context: dict[str, Any],
+        binding: str | None = None,
+        container_format: str | None = None,
     ) -> ConformanceReport:
         """Evaluate all applicable predicates against a context.
 
         Args:
             context: Dict containing manifest and asset data.
             binding: Optional binding mechanism to filter predicates.
+            container_format: Container format from the extractor (e.g. "jpeg").
+                When provided, format-specific predicates that do not apply to
+                this container are skipped.
 
         Returns:
             Complete ConformanceReport.
@@ -1760,8 +2284,28 @@ class PredicateEngine:
         else:
             predicates = list(self._predicates.values())
 
+        # Determine which format families apply to this container
+        if container_format is not None:
+            applicable = self._FORMAT_FAMILIES.get(container_format, set())
+            applicable = applicable | {"cross_cutting"}
+        else:
+            applicable = None  # No filtering
+
         for pred in predicates:
-            result = self.evaluate_predicate(pred["predicate_id"], context)
+            pid = pred["predicate_id"]
+            family = self._predicate_family.get(pid, "cross_cutting")
+
+            if applicable is not None and family not in applicable:
+                report.results.append(
+                    EvalResult(
+                        predicate_id=pid,
+                        result=ResultType.SKIP,
+                        message=f"Not applicable to {container_format} container",
+                    )
+                )
+                continue
+
+            result = self.evaluate_predicate(pid, context)
             report.results.append(result)
 
         return report

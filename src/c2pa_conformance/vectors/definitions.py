@@ -245,10 +245,7 @@ def _ingredient_vectors() -> list[VectorDefinition]:
                                 "dc:title": "Original Image",
                                 "relationship": "parentOf",
                                 "c2pa_manifest": {
-                                    "url": (
-                                        "self#jumbf=/c2pa/"
-                                        f"{_INGREDIENT_LABEL}"
-                                    ),
+                                    "url": (f"self#jumbf=/c2pa/{_INGREDIENT_LABEL}"),
                                 },
                             },
                         },
@@ -283,10 +280,7 @@ def _ingredient_vectors() -> list[VectorDefinition]:
                                 "dc:title": "Component",
                                 "relationship": "componentOf",
                                 "c2pa_manifest": {
-                                    "url": (
-                                        "self#jumbf=/c2pa/"
-                                        f"{_INGREDIENT_LABEL}"
-                                    ),
+                                    "url": (f"self#jumbf=/c2pa/{_INGREDIENT_LABEL}"),
                                 },
                             },
                         },

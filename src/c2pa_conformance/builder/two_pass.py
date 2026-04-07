@@ -86,8 +86,12 @@ def build_bound_manifest(
 
     if container_type == "sidecar":
         return _build_sidecar(
-            claim_data, assertions, private_key, cert_chain,
-            algorithm, manifest_label,
+            claim_data,
+            assertions,
+            private_key,
+            cert_chain,
+            algorithm,
+            manifest_label,
         )
 
     insert_pos = _get_insert_position(container_type, container_bytes)
@@ -99,7 +103,10 @@ def build_bound_manifest(
 
     for _ in range(_MAX_ITERATIONS):
         data_hash_assertion = _make_data_hash_assertion(
-            hash_algorithm, placeholder_hash, insert_pos, exclusion_length,
+            hash_algorithm,
+            placeholder_hash,
+            insert_pos,
+            exclusion_length,
         )
         all_assertions = assertions + [data_hash_assertion]
 
@@ -129,7 +136,10 @@ def build_bound_manifest(
 
     # Rebuild with real hash (same byte length, so JUMBF size is unchanged)
     data_hash_assertion = _make_data_hash_assertion(
-        hash_algorithm, real_hash, insert_pos, exclusion_length,
+        hash_algorithm,
+        real_hash,
+        insert_pos,
+        exclusion_length,
     )
     all_assertions = assertions + [data_hash_assertion]
 
@@ -144,8 +154,7 @@ def build_bound_manifest(
 
     if len(final_jumbf) != len(jumbf_bytes):
         msg = (
-            "JUMBF size changed after hash replacement: "
-            f"{len(jumbf_bytes)} -> {len(final_jumbf)}"
+            f"JUMBF size changed after hash replacement: {len(jumbf_bytes)} -> {len(final_jumbf)}"
         )
         raise RuntimeError(msg)
 
@@ -217,7 +226,9 @@ def _compute_embedded_size(container_type: str, jumbf_length: int) -> int:
 
 
 def _do_embed(
-    container_type: str, container_bytes: bytes, jumbf_bytes: bytes,
+    container_type: str,
+    container_bytes: bytes,
+    jumbf_bytes: bytes,
 ) -> bytes:
     """Embed JUMBF into a container."""
     from c2pa_conformance.embedders import embed_jpeg, embed_png, embed_sidecar
