@@ -22,7 +22,6 @@ classifiers = [
 dependencies = [
     "cbor2>=5.6.0",
     "cryptography>=44.0.0",
-    "pycose>=1.1.0",
     "click>=8.1.0",
     "jmespath>=1.0.0",
     "pyyaml>=6.0",
@@ -33,6 +32,7 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.8.0",
     "mypy>=1.13",
+    "pip-audit>=2.7.0",
 ]
 
 [project.scripts]

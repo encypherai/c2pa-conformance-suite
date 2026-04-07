@@ -5,6 +5,8 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    - cron: "0 8 * * 1"  # Weekly Monday 08:00 UTC
 
 jobs:
   test:
@@ -24,3 +26,16 @@ jobs:
         run: uv run ruff check .
       - name: Test
         run: uv run pytest tests/ -v --ignore=tests/test_integration_c2patool.py
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+      - name: Set up Python
+        run: uv python install 3.12
+      - name: Install dependencies
+        run: uv sync --all-extras
+      - name: Dependency vulnerability scan
+        run: uv run pip-audit
