@@ -7220,6 +7220,398 @@
         }
       },
       {
+        "predicate_id": "PRED-ASSE-023",
+        "source_rules": [
+          "VAL-ASSE-0119"
+        ],
+        "severity": "shall",
+        "title": "Inception action position validation",
+        "description": "If c2pa.actions.v2 contains a c2pa.created action, that action must be the first entry in the actions array. In addition, the first c2pa.actions reference in claim.created_assertions must resolve to c2pa.actions.v2 and not to any other assertion label.",
+        "condition": {
+          "op": "sequence",
+          "steps": [
+            {
+              "step": 1,
+              "op": "conditional",
+              "if": {
+                "op": "compare",
+                "field": "manifest.assertions.c2pa.actions.v2",
+                "op_type": "absent"
+              },
+              "then": {
+                "op": "check_status",
+                "result": "skip",
+                "note": "No c2pa.actions.v2 assertion present; predicate does not apply"
+              }
+            },
+            {
+              "step": 2,
+              "op": "conditional",
+              "if": {
+                "op": "compare",
+                "field": "c2pa.actions.v2.actions[0].action",
+                "op_type": "neq",
+                "value": "c2pa.created"
+              },
+              "then": {
+                "op": "check_status",
+                "result": "pass",
+                "note": "No c2pa.created action present; inception position rule does not apply"
+              }
+            },
+            {
+              "step": 3,
+              "op": "validate_structure",
+              "checks": [
+                {
+                  "op": "compare",
+                  "description": "c2pa.created must be at index 0 of the actions array",
+                  "field": "c2pa.actions.v2.actions[0].action",
+                  "op_type": "eq",
+                  "value": "c2pa.created",
+                  "on_false": {
+                    "status": "assertion.action.malformed",
+                    "result": "fail"
+                  }
+                },
+                {
+                  "op": "compare",
+                  "description": "First c2pa.actions reference in claim.created_assertions must end with c2pa.actions.v2",
+                  "field": "claim.created_assertions.first_actions_ref.url",
+                  "op_type": "ends_with",
+                  "value": "c2pa.actions.v2",
+                  "on_false": {
+                    "status": "assertion.action.malformed",
+                    "result": "fail"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "test_vectors": {
+          "passing": {
+            "description": "c2pa.actions.v2 has c2pa.created as the first action and claim.created_assertions first actions ref ends with c2pa.actions.v2",
+            "expected_result": "pass"
+          },
+          "failing_created_not_first": {
+            "description": "c2pa.actions.v2 has c2pa.created at index 1 rather than index 0",
+            "expected_status": "assertion.action.malformed"
+          },
+          "failing_wrong_ref": {
+            "description": "c2pa.created is at index 0 but claim.created_assertions first actions ref points to c2pa.actions rather than c2pa.actions.v2",
+            "expected_status": "assertion.action.malformed"
+          }
+        }
+      },
+      {
+        "predicate_id": "PRED-ASSE-024",
+        "source_rules": [
+          "VAL-ASSE-0120"
+        ],
+        "severity": "shall",
+        "title": "reviewRatings absent when dataSource is human entry",
+        "description": "If any assertion carries a dataSource.type value of humanEntry.anonymous or humanEntry.credentialed, the same assertion must not also contain a reviewRatings field. The combination implies conflicting provenance claims and must be rejected with assertion.ingredient.malformed.",
+        "condition": {
+          "op": "for_each",
+          "over": "manifest.assertions",
+          "check": {
+            "op": "sequence",
+            "steps": [
+              {
+                "step": 1,
+                "op": "conditional",
+                "if": {
+                  "op": "compare",
+                  "field": "assertion.dataSource.type",
+                  "op_type": "in",
+                  "value": [
+                    "humanEntry.anonymous",
+                    "humanEntry.credentialed"
+                  ]
+                },
+                "then": {
+                  "op": "conditional",
+                  "if": {
+                    "op": "compare",
+                    "field": "assertion.reviewRatings",
+                    "op_type": "present"
+                  },
+                  "then": {
+                    "op": "check_status",
+                    "status": "assertion.ingredient.malformed",
+                    "result": "fail"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "test_vectors": {
+          "passing": {
+            "description": "Assertion has dataSource.type humanEntry.anonymous but no reviewRatings field",
+            "expected_result": "pass"
+          },
+          "failing_reason": {
+            "description": "Assertion has dataSource.type humanEntry.credentialed and also contains a reviewRatings array",
+            "expected_status": "assertion.ingredient.malformed"
+          }
+        }
+      },
+      {
+        "predicate_id": "PRED-ASSE-025",
+        "source_rules": [
+          "VAL-ASSE-0121"
+        ],
+        "severity": "shall",
+        "title": "Mandatory digitalSourceType for editorial and created actions",
+        "description": "Every action in c2pa.actions.v2 must carry a digitalSourceType field unless the action type is one of the exempt administrative types: c2pa.opened, c2pa.converted, c2pa.published, c2pa.repackaged, c2pa.transcoded, c2pa.resized.proportional, c2pa.enhanced, c2pa.edited.metadata, c2pa.watermarked, c2pa.watermarked.bound, c2pa.watermarked.unbound, or c2pa.redacted. An action missing a required digitalSourceType is rejected with assertion.action.malformed.",
+        "condition": {
+          "op": "conditional",
+          "if": {
+            "op": "compare",
+            "field": "manifest.assertions.c2pa.actions.v2",
+            "op_type": "absent"
+          },
+          "then": {
+            "op": "check_status",
+            "result": "skip",
+            "note": "No c2pa.actions.v2 assertion present; predicate does not apply"
+          },
+          "else": {
+            "op": "for_each",
+            "over": "c2pa.actions.v2.actions",
+            "check": {
+              "op": "conditional",
+              "if": {
+                "op": "compare",
+                "field": "action.action",
+                "op_type": "not_in",
+                "value": [
+                  "c2pa.opened",
+                  "c2pa.converted",
+                  "c2pa.published",
+                  "c2pa.repackaged",
+                  "c2pa.transcoded",
+                  "c2pa.resized.proportional",
+                  "c2pa.enhanced",
+                  "c2pa.edited.metadata",
+                  "c2pa.watermarked",
+                  "c2pa.watermarked.bound",
+                  "c2pa.watermarked.unbound",
+                  "c2pa.redacted"
+                ]
+              },
+              "then": {
+                "op": "field_present",
+                "field": "action.digitalSourceType",
+                "on_absent": {
+                  "status": "assertion.action.malformed",
+                  "result": "fail"
+                }
+              }
+            },
+            "on_violation": {
+              "status": "assertion.action.malformed",
+              "result": "fail"
+            }
+          }
+        },
+        "test_vectors": {
+          "passing": {
+            "description": "All non-exempt actions in c2pa.actions.v2 carry a digitalSourceType field",
+            "expected_result": "pass"
+          },
+          "passing_exempt": {
+            "description": "Actions array contains only c2pa.opened and c2pa.published which are exempt; digitalSourceType absent from both",
+            "expected_result": "pass"
+          },
+          "failing_reason": {
+            "description": "c2pa.actions.v2 contains a c2pa.created action without a digitalSourceType field",
+            "expected_status": "assertion.action.malformed"
+          }
+        }
+      },
+      {
+        "predicate_id": "PRED-ASSE-026",
+        "source_rules": [
+          "VAL-ASSE-0122"
+        ],
+        "severity": "shall",
+        "title": "Alternative content representation choice exclusivity",
+        "description": "For a c2pa.alternativeContentRepresentation assertion whose type (or parameters.type) equals exif.originalPreservationImage, exactly one of parameters.multiAssetPartIndex or parameters.embeddedOriginalPreservationImage must be present. Having both or neither is invalid and must be rejected with assertion.alternativeContentRepresentation.malformed.",
+        "condition": {
+          "op": "for_each",
+          "over": "manifest.assertions",
+          "check": {
+            "op": "sequence",
+            "steps": [
+              {
+                "step": 1,
+                "op": "conditional",
+                "if": {
+                  "op": "compare",
+                  "field": "assertion.label",
+                  "op_type": "eq",
+                  "value": "c2pa.alternativeContentRepresentation"
+                },
+                "then": {
+                  "op": "conditional",
+                  "if": {
+                    "op": "compare",
+                    "field": "assertion.parameters.type",
+                    "op_type": "eq",
+                    "value": "exif.originalPreservationImage"
+                  },
+                  "then": {
+                    "op": "mutual_exclusion",
+                    "fields": [
+                      "assertion.parameters.multiAssetPartIndex",
+                      "assertion.parameters.embeddedOriginalPreservationImage"
+                    ],
+                    "require_exactly_one": true,
+                    "on_neither_present": {
+                      "status": "assertion.alternativeContentRepresentation.malformed",
+                      "result": "fail"
+                    },
+                    "on_both_present": {
+                      "status": "assertion.alternativeContentRepresentation.malformed",
+                      "result": "fail"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "test_vectors": {
+          "passing_part_index": {
+            "description": "c2pa.alternativeContentRepresentation with type exif.originalPreservationImage has only parameters.multiAssetPartIndex set",
+            "expected_result": "pass"
+          },
+          "passing_embedded": {
+            "description": "c2pa.alternativeContentRepresentation with type exif.originalPreservationImage has only parameters.embeddedOriginalPreservationImage set",
+            "expected_result": "pass"
+          },
+          "failing_both_present": {
+            "description": "parameters.multiAssetPartIndex and parameters.embeddedOriginalPreservationImage are both present",
+            "expected_status": "assertion.alternativeContentRepresentation.malformed"
+          },
+          "failing_neither_present": {
+            "description": "Neither parameters.multiAssetPartIndex nor parameters.embeddedOriginalPreservationImage is present",
+            "expected_status": "assertion.alternativeContentRepresentation.malformed"
+          }
+        }
+      },
+      {
+        "predicate_id": "PRED-ASSE-027",
+        "source_rules": [
+          "VAL-ASSE-0123"
+        ],
+        "severity": "shall",
+        "title": "Forbidden labels in external references",
+        "description": "A c2pa.external-reference assertion must not reference labels that are forbidden as external targets. If an assertion has both label and url fields but lacks a relationship field, and its label value is c2pa.actions, c2pa.external-reference, or begins with c2pa.hash or c2pa.ingredient, the assertion is invalid and must be rejected with assertion.external-reference.malformed.",
+        "condition": {
+          "op": "for_each",
+          "over": "manifest.assertions",
+          "check": {
+            "op": "sequence",
+            "steps": [
+              {
+                "step": 1,
+                "op": "conditional",
+                "if": {
+                  "op": "validate_structure",
+                  "checks": [
+                    {
+                      "op": "compare",
+                      "field": "assertion.label",
+                      "op_type": "present"
+                    },
+                    {
+                      "op": "compare",
+                      "field": "assertion.url",
+                      "op_type": "present"
+                    },
+                    {
+                      "op": "compare",
+                      "field": "assertion.relationship",
+                      "op_type": "absent"
+                    }
+                  ]
+                },
+                "then": {
+                  "op": "conditional",
+                  "if": {
+                    "op": "validate_structure",
+                    "checks": [
+                      {
+                        "op": "compare",
+                        "field": "assertion.label",
+                        "op_type": "in",
+                        "value": [
+                          "c2pa.actions",
+                          "c2pa.external-reference"
+                        ]
+                      }
+                    ]
+                  },
+                  "then": {
+                    "op": "check_status",
+                    "status": "assertion.external-reference.malformed",
+                    "result": "fail"
+                  },
+                  "else": {
+                    "op": "conditional",
+                    "if": {
+                      "op": "validate_structure",
+                      "checks": [
+                        {
+                          "op": "compare",
+                          "field": "assertion.label",
+                          "op_type": "starts_with_any",
+                          "value": [
+                            "c2pa.hash",
+                            "c2pa.ingredient"
+                          ]
+                        }
+                      ]
+                    },
+                    "then": {
+                      "op": "check_status",
+                      "status": "assertion.external-reference.malformed",
+                      "result": "fail"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "test_vectors": {
+          "passing": {
+            "description": "c2pa.external-reference assertion references a thumbnail label which is not forbidden",
+            "expected_result": "pass"
+          },
+          "passing_has_relationship": {
+            "description": "Assertion has label c2pa.actions and url but also carries a relationship field, so the forbidden-label check does not apply",
+            "expected_result": "pass"
+          },
+          "failing_actions_label": {
+            "description": "Assertion has label c2pa.actions, a url, and no relationship field",
+            "expected_status": "assertion.external-reference.malformed"
+          },
+          "failing_hash_prefix": {
+            "description": "Assertion has label c2pa.hash.data, a url, and no relationship field",
+            "expected_status": "assertion.external-reference.malformed"
+          },
+          "failing_ingredient_prefix": {
+            "description": "Assertion has label c2pa.ingredient.v2, a url, and no relationship field",
+            "expected_status": "assertion.external-reference.malformed"
+          }
+        }
+      },
+      {
         "predicate_id": "PRED-CONT-001",
         "source_rules": [
           "VAL-CONT-0001",

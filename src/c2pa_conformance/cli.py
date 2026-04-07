@@ -44,10 +44,10 @@ def _run_validation_pipeline(
     asset_path: Path,
     engine: object,
     trust_store_path: Path | None = None,
-) -> tuple[object, dict]:
+) -> tuple[object, dict, object, object]:
     """Run the full validation pipeline on a single asset.
 
-    Returns (ConformanceReport, evaluation_context) tuple.
+    Returns (ConformanceReport, evaluation_context, ManifestStore, sig_result) tuple.
     Raises click.ClickException on extraction or parse failures.
     """
     from c2pa_conformance.crypto.trust import TrustAnchorStore
@@ -94,7 +94,7 @@ def _run_validation_pipeline(
     report = engine.evaluate_all(context, container_format=extraction.container_format)
     report.asset_path = str(asset_path)
 
-    return report, context
+    return report, context, store, sig_result
 
 
 @cli.command("validate")
@@ -117,6 +117,13 @@ def _run_validation_pipeline(
     help="Write JSON report to file.",
 )
 @click.option(
+    "--output-format",
+    "output_format",
+    type=click.Choice(["json", "crjson"]),
+    default="json",
+    help="Output format: json (default predicate report) or crjson (C2PA conformance JSON).",
+)
+@click.option(
     "--trust-store",
     type=click.Path(exists=True, path_type=Path),
     default=None,
@@ -127,6 +134,7 @@ def validate(
     predicates: Path | None,
     binding: str | None,
     output: Path | None,
+    output_format: str,
     trust_store: Path | None,
 ) -> None:
     """Validate a single asset against conformance predicates.
@@ -220,14 +228,28 @@ def validate(
 
     if output:
         output.parent.mkdir(parents=True, exist_ok=True)
-        with output.open("w") as f:
-            json.dump(report.to_dict(), f, indent=2)
-            f.write("\n")
+        if output_format == "crjson":
+            from c2pa_conformance.serializer.crjson import serialize_to_crjson
+
+            crjson_data = serialize_to_crjson(store, report, sig_result, context)
+            with output.open("w") as f:
+                json.dump(crjson_data, f, indent=2)
+                f.write("\n")
+        else:
+            with output.open("w") as f:
+                json.dump(report.to_dict(), f, indent=2)
+                f.write("\n")
         click.echo(f"Report written to {output}")
     else:
-        for r in report.results:
-            if r.result.value == "fail":
-                click.echo(f"  FAIL {r.predicate_id}: {r.status_code} {r.message}")
+        if output_format == "crjson":
+            from c2pa_conformance.serializer.crjson import serialize_to_crjson
+
+            crjson_data = serialize_to_crjson(store, report, sig_result, context)
+            click.echo(json.dumps(crjson_data, indent=2))
+        else:
+            for r in report.results:
+                if r.result.value == "fail":
+                    click.echo(f"  FAIL {r.predicate_id}: {r.status_code} {r.message}")
 
 
 def _build_context(store: object, extraction: object, asset_bytes: bytes | None = None) -> dict:
@@ -587,7 +609,7 @@ def suite(
 
     for asset_path in files:
         try:
-            report, _ = _run_validation_pipeline(asset_path, engine, trust_store)
+            report, _ctx, _store, _sig = _run_validation_pipeline(asset_path, engine, trust_store)
             report_dict = report.to_dict()
             is_known = asset_path.name in known
 
@@ -695,7 +717,7 @@ def compare(
 
     # Run suite validation
     click.echo("Running conformance suite validation...")
-    report, _ = _run_validation_pipeline(asset_path, engine, trust_store)
+    report, _, _, _ = _run_validation_pipeline(asset_path, engine, trust_store)
     suite_results = [r.to_dict() for r in report.results]
 
     # Run c2pa-tool
@@ -787,6 +809,89 @@ def report(report_path: Path) -> None:
         click.echo(f"\nFailures ({len(failures)}):")
         for r in failures:
             click.echo(f"  {r['predicate_id']}: {r.get('status_code', '')} {r.get('message', '')}")
+
+
+@cli.command("rubric")
+@click.argument("asset_path", type=click.Path(exists=True, path_type=Path), required=False)
+@click.option(
+    "--rubric",
+    "rubric_path",
+    type=click.Path(exists=True, path_type=Path),
+    required=True,
+    help="Path to rubric YAML file.",
+)
+@click.option(
+    "--crjson-input",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Path to pre-generated crJSON file (skips asset validation).",
+)
+@click.option("--predicates", type=click.Path(exists=True, path_type=Path))
+@click.option("--trust-store", type=click.Path(exists=True, path_type=Path), default=None)
+@click.option(
+    "--output", type=click.Path(path_type=Path), default=None, help="Write JSON results."
+)
+@click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
+def rubric(
+    asset_path: Path | None,
+    rubric_path: Path,
+    crjson_input: Path | None,
+    predicates: Path | None,
+    trust_store: Path | None,
+    output: Path | None,
+    fmt: str,
+) -> None:
+    """Evaluate a conformance rubric against an asset or crJSON file.
+
+    Runs the validation pipeline on the asset, serializes results to crJSON,
+    then evaluates the rubric's jmespath expressions against the crJSON output.
+
+    Either ASSET_PATH or --crjson-input must be provided.
+    """
+    from c2pa_conformance.rubric.evaluator import evaluate_rubric
+
+    if crjson_input is not None:
+        crjson_data = json.loads(crjson_input.read_text())
+        click.echo(f"Loaded crJSON from {crjson_input}")
+    elif asset_path is not None:
+        from c2pa_conformance.evaluator.engine import PredicateEngine
+        from c2pa_conformance.serializer.crjson import serialize_to_crjson
+
+        if predicates is None:
+            default = Path(__file__).parent / "data" / "predicates.json"
+            if not default.exists():
+                raise click.ClickException("No predicates.json found.")
+            predicates = default
+
+        engine = PredicateEngine(predicates)
+        report, context, store, sig_result = _run_validation_pipeline(
+            asset_path, engine, trust_store
+        )
+        crjson_data = serialize_to_crjson(store, report, sig_result, context)
+        click.echo(f"Validated {asset_path.name}: {report.pass_count}P/{report.fail_count}F")
+    else:
+        raise click.ClickException("Provide ASSET_PATH or --crjson-input.")
+
+    rubric_report = evaluate_rubric(crjson_data, rubric_path=rubric_path)
+
+    click.echo(f"Rubric: {rubric_report.rubric_name} v{rubric_report.rubric_version}")
+    click.echo(f"Results: {rubric_report.pass_count} pass, {rubric_report.fail_count} fail")
+
+    if fmt == "text":
+        for r in rubric_report.results:
+            status = "PASS" if r.value else "FAIL"
+            click.echo(f"  [{status}] {r.id}: {r.report_text}")
+            if r.error:
+                click.echo(f"         Error: {r.error}")
+    else:
+        click.echo(json.dumps(rubric_report.to_dict(), indent=2))
+
+    if output:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        with output.open("w") as f:
+            json.dump(rubric_report.to_dict(), f, indent=2)
+            f.write("\n")
+        click.echo(f"Report written to {output}")
 
 
 if __name__ == "__main__":

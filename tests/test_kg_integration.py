@@ -175,4 +175,4 @@ class TestPredicateIdConsistency:
         all_rules: set[str] = set()
         for pred in all_predicates:
             all_rules.update(pred["source_rules"])
-        assert len(all_rules) == 237, f"expected 237 rules, got {len(all_rules)}"
+        assert len(all_rules) == 242, f"expected 242 rules, got {len(all_rules)}"

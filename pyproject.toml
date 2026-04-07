@@ -1,6 +1,6 @@
 [project]
 name = "c2pa-conformance-suite"
-version = "0.1.0"
+version = "1.1.0"
 description = "Deterministic conformance test suite for C2PA implementations, driven by declarative predicates from the C2PA Knowledge Graph."
 readme = "README.md"
 license = "Apache-2.0"
@@ -24,6 +24,8 @@ dependencies = [
     "cryptography>=44.0.0",
     "pycose>=1.1.0",
     "click>=8.1.0",
+    "jmespath>=1.0.0",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]

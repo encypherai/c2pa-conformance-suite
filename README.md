@@ -2,8 +2,10 @@
 
 Deterministic conformance testing for C2PA implementations, driven by declarative
 predicates from the [C2PA Knowledge Graph](https://github.com/encypherai/c2pa-knowledge-graph).
-Evaluates implementation correctness against all 237 normative validation rules in the
-C2PA v2.4 specification without requiring human judgment.
+Evaluates implementation correctness against all 242 normative validation rules in the
+C2PA v2.4 specification without requiring human judgment. Produces
+[crJSON](https://github.com/c2pa-org/conformance) output compatible with the C2PA
+conformance program rubric system.
 
 ## Quick start
 
@@ -16,8 +18,14 @@ pip install -e ".[dev]"
 # Validate a single asset
 c2pa-conform validate signed-image.jpg
 
+# Validate and emit crJSON output
+c2pa-conform validate signed-image.jpg --output-format crjson --output results.json
+
 # Validate a directory of assets
 c2pa-conform suite ./my-assets/ --output report.json
+
+# Run a conformance rubric against an asset
+c2pa-conform rubric signed-image.jpg --rubric conformance-0.2-spec-2.4.yml
 
 # Compare results against c2pa-tool
 c2pa-conform compare signed-image.jpg
@@ -37,19 +45,30 @@ flowchart TD
     F --> G["Predicate Evaluator"]
     G --> H["Crypto Verifier"]
     H --> I["Conformance Report"]
+    I --> J["crJSON Serializer"]
+    J --> K["crJSON Output"]
+    K --> L["Rubric Evaluator"]
+    L --> M["Rubric Report"]
 
     P["predicates.json"] -.-> G
     T["Trust Store (PEM)"] -.-> H
+    R["rubric.yml"] -.-> L
 
     style A fill:#f9f9f9,stroke:#333
     style I fill:#f9f9f9,stroke:#333
+    style K fill:#f9f9f9,stroke:#333
+    style M fill:#f9f9f9,stroke:#333
     style P fill:#e8f4fd,stroke:#336
     style T fill:#e8f4fd,stroke:#336
+    style R fill:#e8f4fd,stroke:#336
 ```
 
 The pipeline is format-agnostic after extraction. Each container format has a thin
 extractor that locates the embedded JUMBF superbox and returns raw bytes. From that
-point forward, all formats follow the same parse, evaluate, verify path.
+point forward, all formats follow the same parse, evaluate, verify path. The crJSON
+serializer transforms validation results into the C2PA conformance program's standard
+JSON-LD format, which the rubric evaluator can then assess against conformance program
+rubrics.
 
 ## CLI commands
 
@@ -72,6 +91,7 @@ Options:
 | `--trust-store` | PEM file with trust anchor certificates |
 | `--binding` | Filter predicates to a specific binding mechanism |
 | `--output` | Write full JSON report to file |
+| `--output-format` | `json` (default predicate report) or `crjson` (C2PA conformance JSON) |
 
 ### `suite` - Batch validation
 
@@ -93,6 +113,35 @@ Options:
 | `--output` | JSON report with per-file results and summary |
 | `--format` | Output format: `text` (default) or `json` |
 | `--fail-fast` | Stop on first failure |
+| `--known-failures` | JSON file mapping filenames to expected-failure reasons |
+
+### `rubric` - Conformance rubric evaluation
+
+```bash
+# Validate asset and evaluate rubric in one step
+c2pa-conform rubric photo.jpg --rubric conformance-0.2-spec-2.4.yml
+
+# Evaluate rubric against pre-generated crJSON
+c2pa-conform rubric --rubric rubric.yml --crjson-input results.json
+
+# JSON output
+c2pa-conform rubric photo.jpg --rubric rubric.yml --format json --output rubric-report.json
+```
+
+Runs the full validation pipeline, serializes results to crJSON, then evaluates
+a conformance program rubric (multi-document YAML with jmespath expressions) against
+the crJSON output. Alternatively accepts pre-generated crJSON via `--crjson-input`.
+
+Options:
+
+| Flag | Purpose |
+|------|---------|
+| `--rubric` | Path to rubric YAML file (required) |
+| `--crjson-input` | Pre-generated crJSON file (skips asset validation) |
+| `--predicates` | Custom predicates.json |
+| `--trust-store` | PEM trust anchors |
+| `--output` | Write JSON rubric report to file |
+| `--format` | Output format: `text` (default) or `json` |
 
 ### `compare` - Side-by-side with c2pa-tool
 
@@ -200,11 +249,13 @@ src/c2pa_conformance/
   builder/       Manifest construction and two-pass signing for test vectors
   compare/       Side-by-side comparison with c2pa-tool
   crypto/        COSE, X.509, OCSP, TSA, hashing, trust store
-  data/          Bundled predicates.json
+  data/          Bundled predicates.json (150 predicates, 242 rules)
   embedders/     JUMBF embedding into containers (JPEG, PNG, sidecar)
   evaluator/     Predicate evaluation engine (72 operators)
   extractors/    Container format extractors (16 formats)
   parser/        JUMBF/CBOR parsing, manifest and ingredient models
+  rubric/        Conformance program rubric evaluator (jmespath + YAML)
+  serializer/    crJSON output serializer (C2PA conformance JSON-LD)
   vectors/       Test vector generation and mutation framework
 ```
 
