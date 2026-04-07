@@ -1,0 +1,61 @@
+[project]
+name = "c2pa-conformance-suite"
+version = "0.1.0"
+description = "Deterministic conformance test suite for C2PA implementations, driven by declarative predicates from the C2PA Knowledge Graph."
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.11"
+authors = [
+    {name = "Encypher Corporation"},
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security :: Cryptography",
+    "Topic :: Software Development :: Testing",
+]
+dependencies = [
+    "cbor2>=5.6.0",
+    "cryptography>=44.0.0",
+    "pycose>=1.1.0",
+    "click>=8.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.8.0",
+    "mypy>=1.13",
+]
+
+[project.scripts]
+c2pa-conform = "c2pa_conformance.cli:cli"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/c2pa_conformance"]
+
+[tool.ruff]
+line-length = 99
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: tests that require external tools (c2patool)",
+]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
