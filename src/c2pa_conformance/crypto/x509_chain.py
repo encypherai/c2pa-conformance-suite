@@ -19,6 +19,24 @@ from c2pa_conformance.crypto.pki import C2PA_EKU_OID
 # id-kp-documentSigning (1.3.6.1.5.5.7.3.3) is accepted as a fallback
 _DOCUMENT_SIGNING_OID = x509.ObjectIdentifier("1.3.6.1.5.5.7.3.3")
 
+# id-kp-emailProtection (1.3.6.1.5.5.7.3.4) - used by some C2PA signers
+_EMAIL_PROTECTION_OID = x509.ObjectIdentifier("1.3.6.1.5.5.7.3.4")
+
+# c2pa-claim_signing OID (1.3.6.1.4.1.62558.2.1) - used by Google Pixel and others
+_C2PA_CLAIM_SIGNING_OID = x509.ObjectIdentifier("1.3.6.1.4.1.62558.2.1")
+
+# Microsoft C2PA Signing OID (1.3.6.1.4.1.311.76.59.1.9)
+_MS_C2PA_SIGNING_OID = x509.ObjectIdentifier("1.3.6.1.4.1.311.76.59.1.9")
+
+# All EKU OIDs accepted for C2PA signer certificates, per the official store.cfg
+_ACCEPTED_EKU_OIDS = frozenset({
+    C2PA_EKU_OID,
+    _DOCUMENT_SIGNING_OID,
+    _EMAIL_PROTECTION_OID,
+    _C2PA_CLAIM_SIGNING_OID,
+    _MS_C2PA_SIGNING_OID,
+})
+
 
 @dataclass
 class ChainValidationResult:
@@ -213,8 +231,7 @@ def validate_signer_eku(cert: x509.Certificate) -> tuple[bool, str]:
         return False, "signingCredential.invalid"
 
     eku: x509.ExtendedKeyUsage = ext.value
-    oids = list(eku)
-    if C2PA_EKU_OID in oids or _DOCUMENT_SIGNING_OID in oids:
+    if any(oid in _ACCEPTED_EKU_OIDS for oid in eku):
         return True, "valid"
     return False, "signingCredential.invalid"
 

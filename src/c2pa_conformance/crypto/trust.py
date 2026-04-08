@@ -90,6 +90,22 @@ class TrustAnchorStore:
         return False
 
 
+def _bundled_trust_list_path() -> Path:
+    """Return the path to the bundled C2PA trust list PEM."""
+    return Path(__file__).parent.parent / "data" / "c2pa_trust_list.pem"
+
+
+def default_trust_store() -> TrustAnchorStore | None:
+    """Load the bundled C2PA trust list as a TrustAnchorStore.
+
+    Returns None if the bundled file is missing (e.g., development builds).
+    """
+    path = _bundled_trust_list_path()
+    if not path.exists():
+        return None
+    return TrustAnchorStore.from_pem_file(path)
+
+
 def evaluate_trust(
     chain: list[x509.Certificate],
     trust_store: TrustAnchorStore,

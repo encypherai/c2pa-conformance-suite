@@ -74,8 +74,13 @@ def _run_validation_pipeline(
     # Read asset once for both binding verification and context
     asset_data = asset_path.read_bytes()
 
-    # Crypto
-    ts = TrustAnchorStore.from_pem_file(trust_store_path) if trust_store_path else None
+    # Crypto -- use bundled C2PA trust list when no explicit store supplied
+    from c2pa_conformance.crypto.trust import default_trust_store
+
+    if trust_store_path:
+        ts = TrustAnchorStore.from_pem_file(trust_store_path)
+    else:
+        ts = default_trust_store()
     sig_result = None
     hash_result = None
     if store.active_manifest:
@@ -185,8 +190,10 @@ def validate(
         + (f", active: {store.active_manifest.label}" if store.active_manifest else "")
     )
 
-    # Step 2.5: Crypto verification
-    ts = TrustAnchorStore.from_pem_file(trust_store) if trust_store else None
+    # Step 2.5: Crypto verification (bundled trust list when none supplied)
+    from c2pa_conformance.crypto.trust import default_trust_store
+
+    ts = TrustAnchorStore.from_pem_file(trust_store) if trust_store else default_trust_store()
 
     # Read asset once for both binding verification and context
     asset_data = asset_path.read_bytes()

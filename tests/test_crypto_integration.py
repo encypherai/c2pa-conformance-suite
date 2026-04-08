@@ -6,13 +6,17 @@ build_crypto_context pipeline using the test PKI infrastructure.
 
 from __future__ import annotations
 
+import datetime as dt
+
 import cbor2
 import pytest
+from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
+from cryptography.x509.oid import NameOID
 
-from c2pa_conformance.crypto.pki import generate_test_pki
+from c2pa_conformance.crypto.pki import C2PA_EKU_OID, generate_signer, generate_test_pki
 from c2pa_conformance.crypto.trust import TrustAnchorStore
 from c2pa_conformance.crypto.verifier import (
     VerificationResult,
@@ -20,6 +24,7 @@ from c2pa_conformance.crypto.verifier import (
     verify_manifest_binding,
     verify_manifest_signature,
 )
+from c2pa_conformance.crypto.x509_chain import validate_signer_eku
 from c2pa_conformance.parser.manifest import Assertion, Claim, Manifest
 
 # ---------------------------------------------------------------------------
@@ -513,3 +518,352 @@ class TestFullPipelineCliContext:
         assert ctx["trust"]["status_code"] == "signingCredential.trusted"
         assert ctx["hash"]["is_valid"] is True
         assert ctx["certificate"]["chain_valid"] is True
+
+
+# ---------------------------------------------------------------------------
+# Helpers for timestamp-based trust extension tests
+# ---------------------------------------------------------------------------
+
+
+def _make_fake_tst_der(gen_time: dt.datetime) -> bytes:
+    """Craft minimal DER containing a GeneralizedTime for timestamp testing."""
+    time_str = gen_time.strftime("%Y%m%d%H%M%S") + "Z"
+    time_bytes = time_str.encode("ascii")
+    gt_tlv = bytes([0x18, len(time_bytes)]) + time_bytes
+    return bytes([0x30, len(gt_tlv)]) + gt_tlv
+
+
+def _sign_claim_with_chain(
+    claim_bytes: bytes,
+    private_key: ec.EllipticCurvePrivateKey,
+    cert_ders: list[bytes],
+    gen_time: dt.datetime | None = None,
+    alg_id: int = -7,
+) -> bytes:
+    """Build COSE_Sign1 with full x5chain and optional fake sigTst timestamp."""
+    protected = cbor2.dumps({1: alg_id, "x5chain": cert_ders})
+    protected_decoded = cbor2.loads(protected)
+    protected_reencoded = cbor2.dumps(protected_decoded)
+    sig_structure = cbor2.dumps(["Signature1", protected_reencoded, b"", claim_bytes])
+    signature = _raw_ec_signature(private_key, sig_structure)
+
+    unprotected: dict = {}
+    if gen_time is not None:
+        unprotected["sigTst"] = _make_fake_tst_der(gen_time)
+
+    return cbor2.dumps(cbor2.CBORTag(18, [protected, unprotected, None, signature]))
+
+
+# ---------------------------------------------------------------------------
+# PKI for timestamp trust extension tests (backdated CAs)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="session")
+def timestamp_pki() -> dict:
+    """Generate a PKI with backdated CAs and an expired short-lived signer.
+
+    Hierarchy:
+      Root CA (valid now-2y to now+10y)
+        +-- Intermediate CA (valid now-1y to now+10y)
+              +-- Expired signer (valid now-60d to now-1d, C2PA EKU)
+    """
+    now = dt.datetime.now(dt.timezone.utc)
+    one_year = dt.timedelta(days=365)
+
+    # Root CA (backdated)
+    root_key = rsa.generate_private_key(65537, 4096)
+    root_name = x509.Name([
+        x509.NameAttribute(NameOID.COUNTRY_NAME, "US"),
+        x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Timestamp Trust Test"),
+        x509.NameAttribute(NameOID.COMMON_NAME, "Test Root CA"),
+    ])
+    root_cert = (
+        x509.CertificateBuilder()
+        .subject_name(root_name)
+        .issuer_name(root_name)
+        .public_key(root_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - 2 * one_year)
+        .not_valid_after(now + 10 * one_year)
+        .add_extension(x509.BasicConstraints(ca=True, path_length=1), critical=True)
+        .add_extension(
+            x509.KeyUsage(
+                digital_signature=False, key_cert_sign=True, crl_sign=True,
+                content_commitment=False, key_encipherment=False,
+                data_encipherment=False, key_agreement=False,
+                encipher_only=False, decipher_only=False,
+            ),
+            critical=True,
+        )
+        .add_extension(
+            x509.SubjectKeyIdentifier.from_public_key(root_key.public_key()),
+            critical=False,
+        )
+        .sign(root_key, hashes.SHA256())
+    )
+
+    # Intermediate CA (backdated)
+    ica_key = rsa.generate_private_key(65537, 2048)
+    ica_name = x509.Name([
+        x509.NameAttribute(NameOID.COUNTRY_NAME, "US"),
+        x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Timestamp Trust Test"),
+        x509.NameAttribute(NameOID.COMMON_NAME, "Test Intermediate CA"),
+    ])
+    ica_cert = (
+        x509.CertificateBuilder()
+        .subject_name(ica_name)
+        .issuer_name(root_name)
+        .public_key(ica_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - one_year)
+        .not_valid_after(now + 10 * one_year)
+        .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
+        .add_extension(
+            x509.KeyUsage(
+                digital_signature=False, key_cert_sign=True, crl_sign=True,
+                content_commitment=False, key_encipherment=False,
+                data_encipherment=False, key_agreement=False,
+                encipher_only=False, decipher_only=False,
+            ),
+            critical=True,
+        )
+        .add_extension(
+            x509.SubjectKeyIdentifier.from_public_key(ica_key.public_key()),
+            critical=False,
+        )
+        .add_extension(
+            x509.AuthorityKeyIdentifier.from_issuer_public_key(root_key.public_key()),
+            critical=False,
+        )
+        .sign(root_key, hashes.SHA256())
+    )
+
+    # Expired short-lived signer (30-day cert, like Google Pixel)
+    signer_key = ec.generate_private_key(ec.SECP256R1())
+    signer_name = x509.Name([
+        x509.NameAttribute(NameOID.COUNTRY_NAME, "US"),
+        x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Timestamp Trust Test"),
+        x509.NameAttribute(NameOID.COMMON_NAME, "Expired Short-Lived Signer"),
+    ])
+    signer_cert = (
+        x509.CertificateBuilder()
+        .subject_name(signer_name)
+        .issuer_name(ica_name)
+        .public_key(signer_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - dt.timedelta(days=60))
+        .not_valid_after(now - dt.timedelta(days=1))
+        .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+        .add_extension(
+            x509.KeyUsage(
+                digital_signature=True, key_cert_sign=False, crl_sign=False,
+                content_commitment=False, key_encipherment=False,
+                data_encipherment=False, key_agreement=False,
+                encipher_only=False, decipher_only=False,
+            ),
+            critical=True,
+        )
+        .add_extension(x509.ExtendedKeyUsage([C2PA_EKU_OID]), critical=False)
+        .add_extension(
+            x509.SubjectKeyIdentifier.from_public_key(signer_key.public_key()),
+            critical=False,
+        )
+        .add_extension(
+            x509.AuthorityKeyIdentifier.from_issuer_public_key(ica_key.public_key()),
+            critical=False,
+        )
+        .sign(ica_key, hashes.SHA256())
+    )
+
+    return {
+        "root_cert": root_cert,
+        "root_key": root_key,
+        "ica_cert": ica_cert,
+        "ica_key": ica_key,
+        "signer_cert": signer_cert,
+        "signer_key": signer_key,
+        "gen_time": now - dt.timedelta(days=30),
+    }
+
+
+@pytest.fixture(scope="session")
+def timestamp_trust_store(timestamp_pki: dict) -> TrustAnchorStore:
+    """Trust store backed by the backdated root CA."""
+    root_pem = timestamp_pki["root_cert"].public_bytes(serialization.Encoding.PEM)
+    return TrustAnchorStore.from_pem_bytes(root_pem)
+
+
+# ---------------------------------------------------------------------------
+# 12. Timestamp-based trust extension (PRED-CRYP-017 / VAL-CRYP-0028)
+# ---------------------------------------------------------------------------
+
+
+class TestTimestampBasedTrustExtension:
+    """C2PA spec: when a trusted timestamp proves signing during cert validity,
+    use genTime as the reference time for certificate validation."""
+
+    def _get_chain_ders(self, pki: dict) -> list[bytes]:
+        return [
+            pki["signer_cert"].public_bytes(serialization.Encoding.DER),
+            pki["ica_cert"].public_bytes(serialization.Encoding.DER),
+            pki["root_cert"].public_bytes(serialization.Encoding.DER),
+        ]
+
+    def test_expired_cert_trusted_with_valid_timestamp(
+        self,
+        timestamp_pki: dict,
+        timestamp_trust_store: TrustAnchorStore,
+    ) -> None:
+        """Expired cert + timestamp genTime within validity = signingCredential.trusted."""
+        chain_ders = self._get_chain_ders(timestamp_pki)
+        gen_time = timestamp_pki["gen_time"]
+
+        claim_data: dict = {"claim_generator": "tst_trust/1.0"}
+        claim_cbor = cbor2.dumps(claim_data)
+        sig_bytes = _sign_claim_with_chain(
+            claim_cbor, timestamp_pki["signer_key"], chain_ders, gen_time=gen_time
+        )
+
+        manifest = _make_manifest(sig_bytes, claim_data)
+        result = verify_manifest_signature(manifest, trust_store=timestamp_trust_store)
+
+        assert result.signature_valid is True
+        assert result.chain_valid is True
+        assert result.trust_status == "signingCredential.trusted"
+
+    def test_expired_cert_fails_without_timestamp(
+        self,
+        timestamp_pki: dict,
+        timestamp_trust_store: TrustAnchorStore,
+    ) -> None:
+        """Expired cert + no timestamp = signingCredential.invalid (expired)."""
+        chain_ders = self._get_chain_ders(timestamp_pki)
+
+        claim_data: dict = {"claim_generator": "no_tst/1.0"}
+        claim_cbor = cbor2.dumps(claim_data)
+        sig_bytes = _sign_claim_with_chain(
+            claim_cbor, timestamp_pki["signer_key"], chain_ders, gen_time=None
+        )
+
+        manifest = _make_manifest(sig_bytes, claim_data)
+        result = verify_manifest_signature(manifest, trust_store=timestamp_trust_store)
+
+        assert result.chain_valid is False
+        assert result.chain_status == "signingCredential.invalid"
+
+    def test_expired_cert_fails_with_timestamp_outside_validity(
+        self,
+        timestamp_pki: dict,
+        timestamp_trust_store: TrustAnchorStore,
+    ) -> None:
+        """Expired cert + timestamp after cert expiry = still fails."""
+        chain_ders = self._get_chain_ders(timestamp_pki)
+        # genTime = today (after cert expired yesterday)
+        bad_gen_time = dt.datetime.now(dt.timezone.utc)
+
+        claim_data: dict = {"claim_generator": "bad_tst/1.0"}
+        claim_cbor = cbor2.dumps(claim_data)
+        sig_bytes = _sign_claim_with_chain(
+            claim_cbor, timestamp_pki["signer_key"], chain_ders, gen_time=bad_gen_time
+        )
+
+        manifest = _make_manifest(sig_bytes, claim_data)
+        result = verify_manifest_signature(manifest, trust_store=timestamp_trust_store)
+
+        assert result.chain_valid is False
+        assert result.chain_status == "signingCredential.invalid"
+
+    def test_valid_cert_with_timestamp_still_trusted(
+        self,
+        pki: dict,
+        root_trust_store: TrustAnchorStore,
+    ) -> None:
+        """Non-expired cert + valid timestamp = still trusted (no regression)."""
+        signer = pki["valid_signer"]
+        intermediate = pki["intermediate"]
+        root = pki["root"]
+        chain_ders = [
+            signer.cert.public_bytes(serialization.Encoding.DER),
+            intermediate.cert.public_bytes(serialization.Encoding.DER),
+            root.cert.public_bytes(serialization.Encoding.DER),
+        ]
+        gen_time = dt.datetime.now(dt.timezone.utc) - dt.timedelta(seconds=30)
+
+        claim_data: dict = {"claim_generator": "valid_tst/1.0"}
+        claim_cbor = cbor2.dumps(claim_data)
+        sig_bytes = _sign_claim_with_chain(
+            claim_cbor, signer.key, chain_ders, gen_time=gen_time
+        )
+
+        manifest = _make_manifest(sig_bytes, claim_data)
+        result = verify_manifest_signature(manifest, trust_store=root_trust_store)
+
+        assert result.signature_valid is True
+        assert result.chain_valid is True
+        assert result.trust_status == "signingCredential.trusted"
+
+
+# ---------------------------------------------------------------------------
+# 13. Google EKU OID acceptance
+# ---------------------------------------------------------------------------
+
+
+_GOOGLE_C2PA_EKU = x509.ObjectIdentifier("1.3.6.1.4.1.62558.2.1")
+_EMAIL_PROTECTION_EKU = x509.ObjectIdentifier("1.3.6.1.5.5.7.3.4")
+
+
+class TestGoogleEkuAccepted:
+    """Validate that Google's private C2PA EKU and emailProtection are accepted."""
+
+    def test_google_private_eku_accepted(self, pki: dict) -> None:
+        signer = generate_signer(
+            pki["intermediate"],
+            common_name="Google-style Signer",
+            eku_oids=[_GOOGLE_C2PA_EKU, _EMAIL_PROTECTION_EKU],
+        )
+        ok, status = validate_signer_eku(signer.cert)
+        assert ok is True
+        assert status == "valid"
+
+    def test_email_protection_eku_alone_accepted(self, pki: dict) -> None:
+        signer = generate_signer(
+            pki["intermediate"],
+            common_name="Email Protection Signer",
+            eku_oids=[_EMAIL_PROTECTION_EKU],
+        )
+        ok, status = validate_signer_eku(signer.cert)
+        assert ok is True
+        assert status == "valid"
+
+    def test_standard_c2pa_eku_still_works(self, pki: dict) -> None:
+        signer = generate_signer(
+            pki["intermediate"],
+            common_name="Standard C2PA Signer",
+            eku_oids=[C2PA_EKU_OID],
+        )
+        ok, status = validate_signer_eku(signer.cert)
+        assert ok is True
+
+
+# ---------------------------------------------------------------------------
+# 14. Bundled C2PA trust list
+# ---------------------------------------------------------------------------
+
+
+class TestBundledTrustList:
+    """Verify the bundled C2PA trust list loads correctly."""
+
+    def test_bundled_trust_list_loads(self) -> None:
+        from c2pa_conformance.crypto.trust import default_trust_store
+
+        store = default_trust_store()
+        assert store is not None
+        assert len(store.anchors) > 0
+
+    def test_bundled_trust_list_has_expected_count(self) -> None:
+        from c2pa_conformance.crypto.trust import default_trust_store
+
+        store = default_trust_store()
+        # The official C2PA trust list (signing + TSA, deduplicated)
+        assert len(store.anchors) >= 15

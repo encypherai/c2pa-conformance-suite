@@ -7,8 +7,10 @@ verify_manifest() entry point used by the CLI pipeline.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
+
+from cryptography import x509
 
 from c2pa_conformance.binding.data_hash import verify_data_hash
 from c2pa_conformance.crypto.cose import (
@@ -19,6 +21,7 @@ from c2pa_conformance.crypto.cose import (
     is_algorithm_allowed,
     verify_signature,
 )
+from c2pa_conformance.crypto.timestamp import validate_timestamp
 from c2pa_conformance.crypto.trust import TrustAnchorStore, evaluate_trust
 from c2pa_conformance.crypto.x509_chain import (
     order_chain,
@@ -110,16 +113,22 @@ def verify_manifest_signature(
             certs = parse_cert_chain(cose_sig.x5chain)
             ordered = order_chain(certs)
 
+            # PRED-CRYP-017 / VAL-CRYP-0028: when a trusted timestamp proves
+            # signing during cert validity, use genTime as the reference time.
+            effective_time = _resolve_validation_time(
+                cose_sig, ordered, validation_time
+            )
+
             # Step 5: Evaluate trust
             if trust_store:
-                trust_result = evaluate_trust(ordered, trust_store, validation_time)
+                trust_result = evaluate_trust(ordered, trust_store, effective_time)
                 result.chain_valid = trust_result.is_valid
                 result.chain_status = trust_result.status_code
                 result.chain_message = trust_result.message
                 result.trust_status = trust_result.status_code
             else:
                 # No trust store -- just validate chain structure
-                chain_result = validate_chain(ordered, validation_time)
+                chain_result = validate_chain(ordered, effective_time)
                 result.chain_valid = chain_result.is_valid
                 result.chain_status = chain_result.status_code
                 result.chain_message = chain_result.message
@@ -129,6 +138,46 @@ def verify_manifest_signature(
             result.chain_message = str(exc)
 
     return result
+
+
+def _resolve_validation_time(
+    cose_sig: CoseSignature,
+    chain: list[x509.Certificate],
+    explicit_time: datetime | None,
+) -> datetime | None:
+    """Determine effective validation time per PRED-CRYP-017 (VAL-CRYP-0028).
+
+    C2PA spec: when a valid timestamp proves signing occurred during the
+    certificate's validity window, the validator must use the TSA-attested
+    genTime rather than the current wall-clock time for all certificate
+    validity checks. This enables short-lived certificates (e.g., Google's
+    30-day Pixel Camera certs) to validate after expiry.
+
+    Returns:
+        explicit_time if caller set it, timestamp genTime when applicable,
+        or None (signals validate_chain to use current time).
+    """
+    if explicit_time is not None:
+        return explicit_time
+
+    tst_data = cose_sig.sig_tst or cose_sig.sig_tst2
+    if tst_data is None or not chain:
+        return None
+
+    tst_result = validate_timestamp(tst_data, cose_sig.signature_bytes)
+    if not tst_result.is_valid or tst_result.gen_time is None:
+        return None
+
+    gen_time = tst_result.gen_time
+    if gen_time.tzinfo is None:
+        gen_time = gen_time.replace(tzinfo=timezone.utc)
+
+    # Check genTime within leaf certificate validity window
+    leaf = chain[0]
+    if leaf.not_valid_before_utc <= gen_time <= leaf.not_valid_after_utc:
+        return gen_time
+
+    return None
 
 
 def verify_manifest_binding(

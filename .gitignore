@@ -11,5 +11,6 @@ build/
 .ruff_cache/
 .mypy_cache/
 *.pem
+!src/c2pa_conformance/data/c2pa_trust_list.pem
 fixtures/pki/*.pem
 fixtures/c2pa-official/
