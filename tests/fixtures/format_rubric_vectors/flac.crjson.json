@@ -1,0 +1,249 @@
+{
+  "@context": {
+    "@vocab": "https://c2pa.org/crjson/"
+  },
+  "manifests": [
+    {
+      "label": "urn:c2pa:d9ee14c1-10e7-4e88-81d3-f92e108454b7",
+      "assertions": {
+        "c2pa.actions.v2": {
+          "actions": [
+            {
+              "action": "c2pa.opened",
+              "when": "2026-04-24T20:53:52Z",
+              "softwareAgent": {
+                "name": "Encypher",
+                "version": "1.0"
+              }
+            }
+          ]
+        },
+        "c2pa.hash.data": {
+          "exclusions": [
+            {
+              "start": 50,
+              "length": 65536
+            }
+          ],
+          "alg": "sha256",
+          "hash": "b64'f10GHGmD3KK6w6X/2Er4VQP7grEeW9TdnMoXCFwktQU='",
+          "pad": "b64''"
+        },
+        "com.encypher.provenance": {
+          "organization_id": "encypher-conformance",
+          "document_id": "conformance-flac",
+          "document_asset_id": "7efa3c5f-4836-446d-9f97-1129bf113117",
+          "signed_at": "2026-04-24T20:53:52Z"
+        }
+      },
+      "claim.v2": {
+        "instanceID": "urn:uuid:a5cde8ef-74b5-48e7-83c8-2a39ea613991",
+        "signature": "self#jumbf=c2pa.signature",
+        "claim_generator_info": {
+          "name": "Encypher",
+          "version": "1.0",
+          "specVersion": "2.4"
+        },
+        "alg": "sha256",
+        "created_assertions": [
+          {
+            "url": "self#jumbf=c2pa.assertions/c2pa.actions.v2",
+            "hash": "b64'LuGM9DIJITQ8kyaPFgDvzkF+aHwWVF9I3eTziL0wIjo='",
+            "alg": "sha256"
+          },
+          {
+            "url": "self#jumbf=c2pa.assertions/c2pa.hash.data",
+            "hash": "b64'Fuw1TSAc50mo+3whfCvjFu6avRBwrp/sgdfKlW8MnOQ='",
+            "alg": "sha256"
+          },
+          {
+            "url": "self#jumbf=c2pa.assertions/com.encypher.provenance",
+            "hash": "b64'K0ZrHL9LwOLot/AvM95jcBAoVOzSk+OP1Jln1OzkM74='",
+            "alg": "sha256"
+          }
+        ],
+        "gathered_assertions": [],
+        "redacted_assertions": []
+      },
+      "signature": {
+        "algorithm": "es256",
+        "certificateInfo": {
+          "serialNumber": "02124246adbf2a735f3f818b4d1ba4dcb8442488",
+          "issuer": {
+            "C": "US",
+            "O": "Encypher Corporation",
+            "CN": "Encypher Test ICA"
+          },
+          "subject": {
+            "C": "US",
+            "O": "Encypher Corporation",
+            "CN": "Encypher Conformance Test Cert"
+          },
+          "validity": {
+            "notBefore": "2026-04-24T15:39:22+00:00",
+            "notAfter": "2027-04-24T15:39:22+00:00"
+          }
+        }
+      },
+      "validationResults": {
+        "success": [
+          {
+            "code": "",
+            "url": "self#jumbf=/c2pa/urn:c2pa:d9ee14c1-10e7-4e88-81d3-f92e108454b7/c2pa.claim",
+            "explanation": ""
+          },
+          {
+            "code": "",
+            "url": "self#jumbf=/c2pa/urn:c2pa:d9ee14c1-10e7-4e88-81d3-f92e108454b7/c2pa.claim",
+            "explanation": ""
+          },
+          {
+            "code": "",
+            "url": "self#jumbf=/c2pa/urn:c2pa:d9ee14c1-10e7-4e88-81d3-f92e108454b7/c2pa.claim",
+            "explanation": ""
+          },
+          {
+            "code": "",
+            "url": "self#jumbf=/c2pa/urn:c2pa:d9ee14c1-10e7-4e88-81d3-f92e108454b7/c2pa.claim",
+            "explanation": ""
+          },
+          {
+            "code": "",
+            "url": "self#jumbf=/c2pa/urn:c2pa:d9ee14c1-10e7-4e88-81d3-f92e108454b7/c2pa.claim",
+            "explanation": ""
+          },
+          {
+            "code": "",
+            "url": "self#jumbf=/c2pa/urn:c2pa:d9ee14c1-10e7-4e88-81d3-f92e108454b7/c2pa.claim",
+            "explanation": ""
+          },
+          {
+            "code": "",
+            "url": "self#jumbf=/c2pa/urn:c2pa:d9ee14c1-10e7-4e88-81d3-f92e108454b7/c2pa.claim",
+            "explanation": ""
+          },
+          {
+            "code": "",
+            "url": "self#jumbf=/c2pa/urn:c2pa:d9ee14c1-10e7-4e88-81d3-f92e108454b7/c2pa.claim",
+            "explanation": ""
+          },
+          {
+            "code": "",
+            "url": "self#jumbf=/c2pa/urn:c2pa:d9ee14c1-10e7-4e88-81d3-f92e108454b7/c2pa.claim",
+            "explanation": ""
+          },
+          {
+            "code": "",
+            "url": "self#jumbf=/c2pa/urn:c2pa:d9ee14c1-10e7-4e88-81d3-f92e108454b7/c2pa.claim",
+            "explanation": ""
+          },
+          {
+            "code": "",
+            "url": "self#jumbf=/c2pa/urn:c2pa:d9ee14c1-10e7-4e88-81d3-f92e108454b7/c2pa.claim",
+            "explanation": ""
+          },
+          {
+            "code": "",
+            "url": "self#jumbf=/c2pa/urn:c2pa:d9ee14c1-10e7-4e88-81d3-f92e108454b7/c2pa.claim",
+            "explanation": ""
+          },
+          {
+            "code": "",
+            "url": "self#jumbf=/c2pa/urn:c2pa:d9ee14c1-10e7-4e88-81d3-f92e108454b7/c2pa.claim",
+            "explanation": ""
+          },
+          {
+            "code": "",
+            "url": "self#jumbf=/c2pa/urn:c2pa:d9ee14c1-10e7-4e88-81d3-f92e108454b7/c2pa.claim",
+            "explanation": ""
+          },
+          {
+            "code": "",
+            "url": "self#jumbf=/c2pa/urn:c2pa:d9ee14c1-10e7-4e88-81d3-f92e108454b7/c2pa.claim",
+            "explanation": ""
+          },
+          {
+            "code": "",
+            "url": "self#jumbf=/c2pa/urn:c2pa:d9ee14c1-10e7-4e88-81d3-f92e108454b7/c2pa.claim",
+            "explanation": ""
+          },
+          {
+            "code": "assertion.hashedURI.match",
+            "url": "self#jumbf=/c2pa/urn:c2pa:d9ee14c1-10e7-4e88-81d3-f92e108454b7/c2pa.claim",
+            "explanation": ""
+          },
+          {
+            "code": "",
+            "url": "self#jumbf=/c2pa/urn:c2pa:d9ee14c1-10e7-4e88-81d3-f92e108454b7/c2pa.claim",
+            "explanation": ""
+          },
+          {
+            "code": "",
+            "url": "self#jumbf=/c2pa/urn:c2pa:d9ee14c1-10e7-4e88-81d3-f92e108454b7/c2pa.claim",
+            "explanation": ""
+          },
+          {
+            "code": "",
+            "url": "self#jumbf=/c2pa/urn:c2pa:d9ee14c1-10e7-4e88-81d3-f92e108454b7/c2pa.claim",
+            "explanation": ""
+          },
+          {
+            "code": "",
+            "url": "self#jumbf=/c2pa/urn:c2pa:d9ee14c1-10e7-4e88-81d3-f92e108454b7/c2pa.claim",
+            "explanation": ""
+          },
+          {
+            "code": "",
+            "url": "self#jumbf=/c2pa/urn:c2pa:d9ee14c1-10e7-4e88-81d3-f92e108454b7/c2pa.claim",
+            "explanation": ""
+          },
+          {
+            "code": "",
+            "url": "self#jumbf=/c2pa/urn:c2pa:d9ee14c1-10e7-4e88-81d3-f92e108454b7/c2pa.claim",
+            "explanation": ""
+          }
+        ],
+        "informational": [
+          {
+            "code": "",
+            "url": "self#jumbf=/c2pa/urn:c2pa:d9ee14c1-10e7-4e88-81d3-f92e108454b7/c2pa.claim",
+            "explanation": ""
+          },
+          {
+            "code": "",
+            "url": "self#jumbf=/c2pa/urn:c2pa:d9ee14c1-10e7-4e88-81d3-f92e108454b7/c2pa.claim",
+            "explanation": ""
+          },
+          {
+            "code": "",
+            "url": "self#jumbf=/c2pa/urn:c2pa:d9ee14c1-10e7-4e88-81d3-f92e108454b7/c2pa.claim",
+            "explanation": ""
+          },
+          {
+            "code": "",
+            "url": "self#jumbf=/c2pa/urn:c2pa:d9ee14c1-10e7-4e88-81d3-f92e108454b7/c2pa.claim",
+            "explanation": ""
+          }
+        ],
+        "failure": [
+          {
+            "code": "signingCredential.untrusted",
+            "url": "self#jumbf=/c2pa/urn:c2pa:d9ee14c1-10e7-4e88-81d3-f92e108454b7/c2pa.signature",
+            "explanation": ""
+          },
+          {
+            "code": "signingCredential.untrusted",
+            "url": "self#jumbf=/c2pa/urn:c2pa:d9ee14c1-10e7-4e88-81d3-f92e108454b7/c2pa.signature",
+            "explanation": ""
+          }
+        ],
+        "specVersion": "2.4",
+        "validationTime": "2026-04-24T21:28:52.511841+00:00"
+      }
+    }
+  ],
+  "jsonGenerator": {
+    "name": "c2pa-conformance-suite",
+    "version": "1.3.0"
+  }
+}

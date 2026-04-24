@@ -1,0 +1,58 @@
+# Rubric composable: collection data hash binding validation.
+#
+# Checks that ZIP-based formats (EPUB, DOCX, ODT, OXPS) use a
+# c2pa.hash.collection.data assertion and that no collection hash
+# validation failures are present.
+#
+# Include this composable in format-specific rubrics for ZIP-based formats.
+
+rubric_metadata:
+  name: "C2PA Collection Binding Composable"
+  version: "0.1.0"
+
+variables:
+  "$collection_hash_label": "c2pa.hash.collection.data"
+  "$collection_hash_failure_codes":
+    - "assertion.collectionHash.mismatch"
+    - "assertion.collectionHash.malformed"
+    - "assertion.collectionHash.invalidURI"
+
+---
+
+- id: "format:collection_hash_present"
+  description: >-
+    Check that a c2pa.hash.collection.data assertion is present
+  expression: >-
+    _assertionKeys()[?@ == $collection_hash_label] | length(@) > `0`
+  reportText:
+    'true':
+      en: Collection data hash assertion (c2pa.hash.collection.data) is present
+    'false':
+      en: >-
+        No c2pa.hash.collection.data assertion found; ZIP-based formats
+        require collection data hashing per C2PA spec Section 18.6
+
+- id: "format:collection_hash_no_failures"
+  description: >-
+    Check that no collection hash validation failures are present
+  failIfMatched: true
+  expression: >-
+    _validationResults().failure[?
+      contains($collection_hash_failure_codes, code)
+    ].code
+  reportText:
+    'true':
+      en: No collection hash validation failures found
+    'false':
+      en: "Found collection hash failures: {{matches}}"
+
+- id: "format:collection_hash_has_alg"
+  description: >-
+    Check that the collection data hash assertion specifies a hash algorithm
+  expression: >-
+    manifests[0].assertions.'c2pa.hash.collection.data'.alg != null
+  reportText:
+    'true':
+      en: Collection data hash assertion specifies a hash algorithm
+    'false':
+      en: Collection data hash assertion missing 'alg' field

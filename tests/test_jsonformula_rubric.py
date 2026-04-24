@@ -670,3 +670,127 @@ class TestUpstreamVectors:
                 assert our_results_by_id[expected_id] is True, (
                     f"Expected {expected_id} to pass but got fail"
                 )
+
+
+# ---------------------------------------------------------------------------
+# Format-specific rubric tests (deferred formats)
+# ---------------------------------------------------------------------------
+FORMAT_VECTORS = FIXTURES / "format_rubric_vectors"
+
+_COLLECTION_FORMATS = ["docx", "epub", "odt", "oxps"]
+_EXTENDED_BINDING_FORMATS = ["flac", "otf", "jxl"]
+
+
+class TestCollectionFormatRubric:
+    """Evaluate the collection format rubric against ZIP-based format vectors."""
+
+    @pytest.fixture()
+    def rubric(self) -> ComposedRubric:
+        return compose(RUBRICS_DIR / "asset-rubric-format-collection.yml")
+
+    @pytest.mark.parametrize("fmt", _COLLECTION_FORMATS)
+    def test_no_evaluation_errors(self, rubric: ComposedRubric, fmt: str) -> None:
+        crjson = json.loads((FORMAT_VECTORS / f"{fmt}.crjson.json").read_text())
+        report = evaluate_composed_rubric(crjson, rubric)
+        errors = [r for r in report.results if r.error is not None]
+        assert len(errors) == 0, f"{fmt}: evaluation errors: {[e.error for e in errors]}"
+
+    @pytest.mark.parametrize("fmt", _COLLECTION_FORMATS)
+    def test_structural_and_integrity_pass(self, rubric: ComposedRubric, fmt: str) -> None:
+        crjson = json.loads((FORMAT_VECTORS / f"{fmt}.crjson.json").read_text())
+        report = evaluate_composed_rubric(crjson, rubric)
+        results = {r.id: r.value for r in report.results}
+        assert results["validation:well_formed_data_present"] is True
+        assert results["validation:well_formed_success"] is True
+        assert results["validation:valid_data_present"] is True
+        assert results["validation:valid_success"] is True
+
+    @pytest.mark.parametrize("fmt", _COLLECTION_FORMATS)
+    def test_collection_hash_present(self, rubric: ComposedRubric, fmt: str) -> None:
+        crjson = json.loads((FORMAT_VECTORS / f"{fmt}.crjson.json").read_text())
+        report = evaluate_composed_rubric(crjson, rubric)
+        results = {r.id: r.value for r in report.results}
+        assert results["format:collection_hash_present"] is True
+
+    @pytest.mark.parametrize("fmt", _COLLECTION_FORMATS)
+    def test_collection_hash_no_failures(self, rubric: ComposedRubric, fmt: str) -> None:
+        crjson = json.loads((FORMAT_VECTORS / f"{fmt}.crjson.json").read_text())
+        report = evaluate_composed_rubric(crjson, rubric)
+        results = {r.id: r.value for r in report.results}
+        assert results["format:collection_hash_no_failures"] is True
+
+    @pytest.mark.parametrize("fmt", _COLLECTION_FORMATS)
+    def test_collection_hash_has_alg(self, rubric: ComposedRubric, fmt: str) -> None:
+        crjson = json.loads((FORMAT_VECTORS / f"{fmt}.crjson.json").read_text())
+        report = evaluate_composed_rubric(crjson, rubric)
+        results = {r.id: r.value for r in report.results}
+        assert results["format:collection_hash_has_alg"] is True
+
+    @pytest.mark.parametrize("fmt", _COLLECTION_FORMATS)
+    def test_trust_fails_without_trust_store(self, rubric: ComposedRubric, fmt: str) -> None:
+        """Trust check fails as expected when our CA is not in the trust store."""
+        crjson = json.loads((FORMAT_VECTORS / f"{fmt}.crjson.json").read_text())
+        report = evaluate_composed_rubric(crjson, rubric)
+        results = {r.id: r.value for r in report.results}
+        assert results["validation:trusted_success"] is False
+
+
+class TestExtendedBindingRubric:
+    """Evaluate the extended data binding rubric against FLAC/OTF/JXL vectors."""
+
+    @pytest.fixture()
+    def rubric(self) -> ComposedRubric:
+        return compose(RUBRICS_DIR / "asset-rubric-format-extended-binding.yml")
+
+    @pytest.mark.parametrize("fmt", _EXTENDED_BINDING_FORMATS)
+    def test_no_evaluation_errors(self, rubric: ComposedRubric, fmt: str) -> None:
+        crjson = json.loads((FORMAT_VECTORS / f"{fmt}.crjson.json").read_text())
+        report = evaluate_composed_rubric(crjson, rubric)
+        errors = [r for r in report.results if r.error is not None]
+        assert len(errors) == 0, f"{fmt}: evaluation errors: {[e.error for e in errors]}"
+
+    @pytest.mark.parametrize("fmt", _EXTENDED_BINDING_FORMATS)
+    def test_structural_and_integrity_pass(self, rubric: ComposedRubric, fmt: str) -> None:
+        crjson = json.loads((FORMAT_VECTORS / f"{fmt}.crjson.json").read_text())
+        report = evaluate_composed_rubric(crjson, rubric)
+        results = {r.id: r.value for r in report.results}
+        assert results["validation:well_formed_data_present"] is True
+        assert results["validation:well_formed_success"] is True
+        assert results["validation:valid_data_present"] is True
+        assert results["validation:valid_success"] is True
+
+    @pytest.mark.parametrize("fmt", _EXTENDED_BINDING_FORMATS)
+    def test_data_hash_present(self, rubric: ComposedRubric, fmt: str) -> None:
+        crjson = json.loads((FORMAT_VECTORS / f"{fmt}.crjson.json").read_text())
+        report = evaluate_composed_rubric(crjson, rubric)
+        results = {r.id: r.value for r in report.results}
+        assert results["format:data_hash_present"] is True
+
+    @pytest.mark.parametrize("fmt", _EXTENDED_BINDING_FORMATS)
+    def test_data_hash_no_failures(self, rubric: ComposedRubric, fmt: str) -> None:
+        crjson = json.loads((FORMAT_VECTORS / f"{fmt}.crjson.json").read_text())
+        report = evaluate_composed_rubric(crjson, rubric)
+        results = {r.id: r.value for r in report.results}
+        assert results["format:data_hash_no_failures"] is True
+
+    @pytest.mark.parametrize("fmt", _EXTENDED_BINDING_FORMATS)
+    def test_data_hash_has_exclusions(self, rubric: ComposedRubric, fmt: str) -> None:
+        crjson = json.loads((FORMAT_VECTORS / f"{fmt}.crjson.json").read_text())
+        report = evaluate_composed_rubric(crjson, rubric)
+        results = {r.id: r.value for r in report.results}
+        assert results["format:data_hash_has_exclusions"] is True
+
+    @pytest.mark.parametrize("fmt", _EXTENDED_BINDING_FORMATS)
+    def test_data_hash_has_alg(self, rubric: ComposedRubric, fmt: str) -> None:
+        crjson = json.loads((FORMAT_VECTORS / f"{fmt}.crjson.json").read_text())
+        report = evaluate_composed_rubric(crjson, rubric)
+        results = {r.id: r.value for r in report.results}
+        assert results["format:data_hash_has_alg"] is True
+
+    @pytest.mark.parametrize("fmt", _EXTENDED_BINDING_FORMATS)
+    def test_trust_fails_without_trust_store(self, rubric: ComposedRubric, fmt: str) -> None:
+        """Trust check fails as expected when our CA is not in the trust store."""
+        crjson = json.loads((FORMAT_VECTORS / f"{fmt}.crjson.json").read_text())
+        report = evaluate_composed_rubric(crjson, rubric)
+        results = {r.id: r.value for r in report.results}
+        assert results["validation:trusted_success"] is False

@@ -1,0 +1,71 @@
+# Rubric composable: extended data hash binding validation.
+#
+# Checks that formats using c2pa.hash.data with byte-range exclusions
+# (FLAC, OTF, JXL) have a valid binding assertion and no data hash
+# validation failures.
+#
+# Include this composable in format-specific rubrics for formats
+# that use c2pa.hash.data with exclusion ranges.
+
+rubric_metadata:
+  name: "C2PA Extended Data Binding Composable"
+  version: "0.1.0"
+
+variables:
+  "$data_hash_label": "c2pa.hash.data"
+  "$data_hash_failure_codes":
+    - "assertion.dataHash.mismatch"
+    - "assertion.dataHash.malformed"
+
+---
+
+- id: "format:data_hash_present"
+  description: >-
+    Check that a c2pa.hash.data assertion is present
+  expression: >-
+    _assertionKeys()[?contains(@, $data_hash_label)] | length(@) > `0`
+  reportText:
+    'true':
+      en: Data hash assertion (c2pa.hash.data) is present
+    'false':
+      en: >-
+        No c2pa.hash.data assertion found; this format requires
+        data hashing with byte-range exclusions
+
+- id: "format:data_hash_no_failures"
+  description: >-
+    Check that no data hash validation failures are present
+  failIfMatched: true
+  expression: >-
+    _validationResults().failure[?
+      contains($data_hash_failure_codes, code)
+    ].code
+  reportText:
+    'true':
+      en: No data hash validation failures found
+    'false':
+      en: "Found data hash failures: {{matches}}"
+
+- id: "format:data_hash_has_exclusions"
+  description: >-
+    Check that the data hash assertion specifies exclusion ranges
+  expression: >-
+    _assertionValues()[?contains(_assertionKeys(), $data_hash_label)].exclusions != null
+  reportText:
+    'true':
+      en: Data hash assertion specifies exclusion ranges
+    'false':
+      en: >-
+        Data hash assertion missing 'exclusions' field;
+        this format requires byte-range exclusions for the manifest placeholder
+
+- id: "format:data_hash_has_alg"
+  description: >-
+    Check that the data hash assertion specifies a hash algorithm
+  expression: >-
+    _assertionValues()[?contains(_assertionKeys(), $data_hash_label)].alg != null
+  reportText:
+    'true':
+      en: Data hash assertion specifies a hash algorithm
+    'false':
+      en: Data hash assertion missing 'alg' field

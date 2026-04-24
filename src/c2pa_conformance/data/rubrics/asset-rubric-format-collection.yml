@@ -1,0 +1,12 @@
+rubric_metadata:
+  name: C2PA Collection Format Rubric
+  version: 0.1.0
+  description: >-
+    Rubric for ZIP-based collection formats (EPUB, DOCX, ODT, OXPS) that
+    use c2pa.hash.collection.data for content binding. Validates the
+    presence and correctness of collection data hash assertions alongside
+    standard integrity checks.
+include:
+  - composables/globals.yml
+  - composables/integrity.yml
+  - composables/format-collection-binding.yml
