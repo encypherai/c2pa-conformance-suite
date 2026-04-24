@@ -1,0 +1,14 @@
+{
+  "manifests": [
+    {
+      "assertions": {
+        "c2pa.some_assertion": {
+          "reviewRatings": [],
+          "dataSource": {
+            "type": "humanEntry.anonymous"
+          }
+        }
+      }
+    }
+  ]
+}

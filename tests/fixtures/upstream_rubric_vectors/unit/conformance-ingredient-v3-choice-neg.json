@@ -1,0 +1,14 @@
+{
+  "manifests": [
+    {
+      "label": "urn:c2pa:default",
+      "assertions": {
+        "c2pa.ingredient.v3": {
+          "relationship": "parentOf",
+          "activeManifest": "urn:c2pa:something",
+          "digitalSourceType": "http://cv.iptc.org/newscodes/digitalsourcetype/trainedAlgorithmicMedia"
+        }
+      }
+    }
+  ]
+}

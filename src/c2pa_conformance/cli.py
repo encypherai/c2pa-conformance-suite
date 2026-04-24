@@ -824,8 +824,8 @@ def report(report_path: Path) -> None:
     "--rubric",
     "rubric_path",
     type=click.Path(exists=True, path_type=Path),
-    required=True,
-    help="Path to rubric YAML file.",
+    default=None,
+    help="Path to rubric YAML file. Defaults to bundled conformance 0.2 spec 2.4 rubric.",
 )
 @click.option(
     "--crjson-input",
@@ -839,19 +839,35 @@ def report(report_path: Path) -> None:
     "--output", type=click.Path(path_type=Path), default=None, help="Write JSON results."
 )
 @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
+@click.option(
+    "--engine",
+    type=click.Choice(["auto", "jmespath", "json-formula"]),
+    default="auto",
+    help="Expression engine: auto (default), jmespath (legacy), or json-formula.",
+)
+@click.option(
+    "--signal-rubric",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Path to signal rubric YAML for signal evaluation.",
+)
 def rubric(
     asset_path: Path | None,
-    rubric_path: Path,
+    rubric_path: Path | None,
     crjson_input: Path | None,
     predicates: Path | None,
     trust_store: Path | None,
     output: Path | None,
     fmt: str,
+    engine: str,
+    signal_rubric: Path | None,
 ) -> None:
     """Evaluate a conformance rubric against an asset or crJSON file.
 
     Runs the validation pipeline on the asset, serializes results to crJSON,
-    then evaluates the rubric's jmespath expressions against the crJSON output.
+    then evaluates the rubric expressions against the crJSON output. Supports
+    both legacy JMESPath and json-formula (C2PA conformance program v0.2)
+    rubric formats.
 
     Either ASSET_PATH or --crjson-input must be provided.
     """
@@ -870,16 +886,33 @@ def rubric(
                 raise click.ClickException("No predicates.json found.")
             predicates = default
 
-        engine = PredicateEngine(predicates)
+        engine_pred = PredicateEngine(predicates)
         report, context, store, sig_result = _run_validation_pipeline(
-            asset_path, engine, trust_store
+            asset_path, engine_pred, trust_store
         )
         crjson_data = serialize_to_crjson(store, report, sig_result, context)
         click.echo(f"Validated {asset_path.name}: {report.pass_count}P/{report.fail_count}F")
     else:
         raise click.ClickException("Provide ASSET_PATH or --crjson-input.")
 
-    rubric_report = evaluate_rubric(crjson_data, rubric_path=rubric_path)
+    # Default to bundled conformance 0.2 spec 2.4 rubric
+    if rubric_path is None:
+        default_rubric = (
+            Path(__file__).parent / "data" / "rubrics"
+            / "asset-rubric-conformance0.2-spec2.4.yml"
+        )
+        if default_rubric.exists():
+            rubric_path = default_rubric
+        else:
+            raise click.ClickException(
+                "No rubric specified and bundled conformance rubric not found. "
+                "Use --rubric to specify a rubric file."
+            )
+
+    engine_choice = engine if engine != "auto" else None
+    rubric_report = evaluate_rubric(
+        crjson_data, rubric_path=rubric_path, engine=engine_choice,
+    )
 
     click.echo(f"Rubric: {rubric_report.rubric_name} v{rubric_report.rubric_version}")
     click.echo(f"Results: {rubric_report.pass_count} pass, {rubric_report.fail_count} fail")
@@ -893,10 +926,35 @@ def rubric(
     else:
         click.echo(json.dumps(rubric_report.to_dict(), indent=2))
 
+    # Signal rubric evaluation
+    if signal_rubric is not None:
+        from c2pa_conformance.rubric.signal_evaluator import evaluate_signal_rubric
+
+        click.echo("\n--- Signal Rubric Evaluation ---")
+        sig_report = evaluate_signal_rubric(crjson_data, signal_rubric)
+        click.echo(
+            f"Signal Rubric: {sig_report.rubric_name} v{sig_report.rubric_version}"
+        )
+
+        for i, m in enumerate(sig_report.manifests):
+            cn = m.asserted_by.get("CN", "?")
+            click.echo(f"\n  Manifest {i} ({cn}):")
+            if m.local_inceptions:
+                for s in m.local_inceptions:
+                    click.echo(f"    [INCEPTION] {s.trait}: {s.report_text}")
+            if m.local_transformations:
+                for s in m.local_transformations:
+                    click.echo(f"    [TRANSFORM] {s.trait}: {s.report_text}")
+            if not m.local_inceptions and not m.local_transformations:
+                click.echo("    (no signals)")
+
     if output:
         output.parent.mkdir(parents=True, exist_ok=True)
+        result_data: dict = rubric_report.to_dict()
+        if signal_rubric is not None:
+            result_data["signal_rubric"] = sig_report.to_dict()
         with output.open("w") as f:
-            json.dump(rubric_report.to_dict(), f, indent=2)
+            json.dump(result_data, f, indent=2)
             f.write("\n")
         click.echo(f"Report written to {output}")
 

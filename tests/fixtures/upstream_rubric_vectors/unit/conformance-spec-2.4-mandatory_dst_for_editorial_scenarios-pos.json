@@ -1,0 +1,16 @@
+{
+  "manifests": [
+    {
+      "assertions": {
+        "c2pa.actions.v2": {
+          "actions": [
+            {
+              "action": "c2pa.created",
+              "digitalSourceType": "http://cv.iptc.org/newscodes/digitalsourcetype/trainedAlgorithmicMedia"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "manifests": [
+    {
+      "label": "urn:c2pa:default",
+      "claim.v2": {
+        "specVersion": "0.2.0",
+        "claim_generator_info": {
+          "name": "Test Generator"
+        }
+      },
+      "assertions": {
+        "c2pa.actions.v2": {
+          "actions": []
+        }
+      }
+    }
+  ]
+}

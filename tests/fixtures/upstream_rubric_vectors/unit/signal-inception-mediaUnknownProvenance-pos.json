@@ -1,0 +1,22 @@
+{
+  "manifests": [
+    {
+      "label": "urn:c2pa:default",
+      "claim.v2": {
+        "created_assertions": [
+          {
+            "url": "self#jumbf=c2pa.assertions/c2pa.ingredient.v3"
+          }
+        ]
+      },
+      "assertions": {
+        "c2pa.ingredient.v3": [
+          {
+            "relationship": "parentOf"
+          }
+        ]
+      }
+
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "manifests": [
+    {
+      "assertions": {
+        "c2pa.assertion.metadata": {},
+        "c2pa.time-stamp": {},
+        "c2pa.certificate-status": {}
+      }
+    }
+  ]
+}

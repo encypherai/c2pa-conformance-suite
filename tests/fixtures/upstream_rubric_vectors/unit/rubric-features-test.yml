@@ -1,0 +1,87 @@
+rubric_metadata:
+  name: "json-formula Feature Test Rubric"
+  issuer: "C2PA Conformance Task Force"
+  date: "2026-04-20T00:00:00Z"
+  version: "1.0.0"
+  language: en
+
+variables:
+  "$allowed_types":
+    - "typeA"
+    - "typeB"
+    - "typeC"
+  "$error_codes":
+    - "err.one"
+    - "err.two"
+  "$threshold": 3
+
+expressions:
+  # Expression using manifests[0] prefix (conformance root)
+  _getActions: "manifests[0].assertions.'c2pa.actions.v2'.actions || `[]`"
+  _getFailures: "(manifests[0].validationResults || { failure: [] }).failure"
+
+---
+
+- id: test:variable_contains
+  description: Test that $allowed_types variable works in contains()
+  expression: "length(manifests[0].items[?!contains($allowed_types, type)]) == `0`"
+  reportText:
+    'true':
+      en: All items have allowed types
+    'false':
+      en: Found items with disallowed types
+
+- id: test:named_expression
+  description: Test that _getActions() named expression works
+  expression: "length(_getActions()) >= `0`"
+  reportText:
+    'true':
+      en: Actions expression evaluated successfully
+    'false':
+      en: Actions expression failed
+
+- id: test:quoted_field_access
+  description: Test single-quoted field name access for hyphenated keys
+  expression: "manifests[0].assertions.'c2pa.actions.v2' != null"
+  reportText:
+    'true':
+      en: c2pa.actions.v2 assertion present
+    'false':
+      en: c2pa.actions.v2 assertion absent
+
+- id: test:string_comparison
+  description: Test double-quoted string literal comparison
+  expression: 'manifests[0].status == "active"'
+  reportText:
+    'true':
+      en: Status is active
+    'false':
+      en: Status is not active
+
+- id: test:validation_results_expression
+  description: Test _getFailures() named expression with fallback
+  expression: "length(_getFailures()[?contains($error_codes, code)]) == `0`"
+  failIfMatched: false
+  reportText:
+    'true':
+      en: No matching error codes in failures
+    'false':
+      en: Found matching error codes
+
+- id: test:startsWith_function
+  description: Test startsWith() camelCase function
+  expression: 'startsWith(manifests[0].label, "urn:c2pa:")'
+  reportText:
+    'true':
+      en: "Label starts with urn:c2pa:"
+    'false':
+      en: "Label does not start with urn:c2pa:"
+
+- id: test:notNull_function
+  description: Test notNull() function with fallback
+  expression: 'notNull(manifests[0].label, "") != ""'
+  reportText:
+    'true':
+      en: Label is present
+    'false':
+      en: Label is absent

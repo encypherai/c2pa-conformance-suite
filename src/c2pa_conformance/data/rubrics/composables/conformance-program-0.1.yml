@@ -1,0 +1,23 @@
+- id: validation:inception_action_position
+  description: Check if an inception action is the first action in the first actions assertion in created_assertions
+  expression: |
+    endsWith(notNull(_createdAssertions()[?contains(url, "c2pa.actions")] | [0].url, ""), "c2pa.actions.v2") &&
+    (length(_actionsV2()[?action == "c2pa.created"]) == 0 ||
+      contains(`["c2pa.created", "c2pa.opened"]`, _actionsV2()[0].action))
+  reportText:
+    'true':
+      en: Inception action is correctly positioned as the first item in the first created actions assertion
+    'false':
+      en: Inception action is not in the first actions assertion of created_assertions (or first item is not an actions assertion)
+
+
+
+- id: validation:no_dst_for_opened_action
+  description: Check that c2pa.opened actions do not have digitalSourceType
+  expression: |
+    length(_actionsV2()[?action == "c2pa.opened" && digitalSourceType != null()]) == 0
+  reportText:
+    'true':
+      en: No c2pa.opened actions have a digitalSourceType
+    'false':
+      en: Found c2pa.opened actions with a digitalSourceType

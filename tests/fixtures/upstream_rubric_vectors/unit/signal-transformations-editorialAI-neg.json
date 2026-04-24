@@ -1,0 +1,24 @@
+{
+  "manifests": [
+    {
+      "label": "urn:c2pa:default",
+      "claim.v2": {
+        "created_assertions": [
+          {
+            "url": "self#jumbf=c2pa.assertions/c2pa.actions.v2"
+          }
+        ]
+      },
+      "assertions": {
+        "c2pa.actions.v2": {
+          "actions": [
+            {
+              "action": "c2pa.edited",
+              "digitalSourceType": "http://cv.iptc.org/newscodes/digitalsourcetype/digitalCapture"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

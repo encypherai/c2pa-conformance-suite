@@ -1,0 +1,9 @@
+{
+  "manifests": [
+    {
+      "claim.v2": {
+        "specVersion": "2.4"
+      }
+    }
+  ]
+}

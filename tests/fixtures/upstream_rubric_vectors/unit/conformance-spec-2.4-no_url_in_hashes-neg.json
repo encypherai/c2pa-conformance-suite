@@ -1,0 +1,12 @@
+{
+  "manifests": [
+    {
+      "assertions": {
+        "c2pa.hash.data": {
+          "url": "http://example.com",
+          "hash": "abc"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "manifests": [
+    {
+      "assertions": {
+        "c2pa.some_assertion": {
+          "type": "exif.originalPreservationImage",
+          "parameters": {
+            "multiAssetPartIndex": 1,
+            "embeddedOriginalPreservationImage": true
+          }
+        }
+      }
+    }
+  ]
+}

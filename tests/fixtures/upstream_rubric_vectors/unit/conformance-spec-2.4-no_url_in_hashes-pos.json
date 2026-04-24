@@ -1,0 +1,11 @@
+{
+  "manifests": [
+    {
+      "assertions": {
+        "c2pa.hash.data": {
+          "hash": "abc"
+        }
+      }
+    }
+  ]
+}

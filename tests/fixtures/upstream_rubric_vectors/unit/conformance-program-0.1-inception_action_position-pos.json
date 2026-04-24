@@ -1,0 +1,22 @@
+{
+  "manifests": [
+    {
+      "claim.v2": {
+        "created_assertions": [
+          {
+            "url": "self#jumbf=/c2pa/urn:c2pa:abc/c2pa.assertions/c2pa.actions.v2"
+          }
+        ]
+      },
+      "assertions": {
+        "c2pa.actions.v2": {
+          "actions": [
+            {
+              "action": "c2pa.created"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

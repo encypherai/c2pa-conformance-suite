@@ -1,0 +1,12 @@
+{
+  "manifests": [
+    {
+      "assertions": {
+        "c2pa.some_assertion": {
+          "label": "c2pa.metadata",
+          "url": "http://example.com"
+        }
+      }
+    }
+  ]
+}

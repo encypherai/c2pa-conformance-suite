@@ -1,0 +1,63 @@
+rubric_metadata:
+  name: "C2PA Signal Rubric Globals"
+  issuer: "C2PA Conformance Task Force"
+  date: "2026-03-31T05:00:00Z"
+  version: "1.0.0"
+  language: en
+
+variables:
+  # Actions treated as non-editorial — excluded from the editorial transformation signal checks
+  # (editorialAI, editorialNonAI, editorialPossiblyGenAI)
+  "$non_editorial_actions":
+    - "c2pa.created"
+    - "c2pa.opened"
+    - "c2pa.converted"
+    - "c2pa.published"
+    - "c2pa.repackaged"
+    - "c2pa.transcoded"
+    - "c2pa.resized.proportional"
+    - "c2pa.enhanced"
+    - "c2pa.edited.metadata"
+    - "c2pa.watermarked"
+    - "c2pa.watermarked.bound"
+    - "c2pa.watermarked.unbound"
+    - "c2pa.redacted"
+
+  # The explicit set of non-editorial transformation actions — used as a positive match
+  # in the nonEditorial signal (all non-editorial actions except c2pa.created/c2pa.opened)
+  "$non_editorial_transformation_actions":
+    - "c2pa.converted"
+    - "c2pa.published"
+    - "c2pa.repackaged"
+    - "c2pa.transcoded"
+    - "c2pa.resized.proportional"
+    - "c2pa.enhanced"
+    - "c2pa.edited.metadata"
+    - "c2pa.watermarked"
+    - "c2pa.watermarked.bound"
+    - "c2pa.watermarked.unbound"
+    - "c2pa.redacted"
+
+  # GenAI digitalSourceType values — used positively in editorialAI, negatively in editorialNonAI
+  "$genai_dst_types":
+    - "http://cv.iptc.org/newscodes/digitalsourcetype/trainedAlgorithmicMedia"
+    - "http://cv.iptc.org/newscodes/digitalsourcetype/compositeWithTrainedAlgorithmicMedia"
+    - "http://cv.iptc.org/newscodes/digitalsourcetype/compositeSynthetic"
+
+  # digitalSourceType values that indicate editorial transformations possibly using GenAI
+  "$possibly_genai_dst_types":
+    - "http://cv.iptc.org/newscodes/digitalsourcetype/digitalArt"
+    - "http://cv.iptc.org/newscodes/digitalsourcetype/composite"
+
+expressions:
+  # Signal-context expressions (root = manifests[0], no manifests[0] prefix needed)
+
+  # Common preamble for all signal checks: c2pa.actions.v2 assertion exists and was created by this manifest
+  _hasActionsV2: 'assertions.''c2pa.actions.v2'' != null && length(''claim.v2''.created_assertions[?contains(url, "c2pa.actions.v2")]) > 0'
+
+  # Shorthand for the actions array in c2pa.actions.v2
+  _signalActions: "assertions.'c2pa.actions.v2'.actions"
+
+  # Check for a c2pa.created action with a specific digitalSourceType ($arg0).
+  # Used by inception signals that match a single DST value.
+  _createdWithDst: '_hasActionsV2() && length(_signalActions()[? action == "c2pa.created" && digitalSourceType == $arg0]) > 0'

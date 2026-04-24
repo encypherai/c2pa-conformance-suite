@@ -1,0 +1,115 @@
+- id: validation:no_deprecated_assertions
+  description: Check for known deprecated assertion labels (e.g. from v2.0 or earlier specs)
+  failIfMatched: true
+  expression: |
+    _assertionKeys()[?startsWith(@, "stds.") || contains($deprecated_assertion_labels, @)]
+  reportText:
+    'true':
+      en: No deprecated standard assertions found
+    'false':
+      en: "Found deprecated standard assertions: {{matches}}"
+
+- id: validation:no_unsupported_assertions
+  description: Check if all C2PA standard assertions are in the allow-list for Spec 2.4
+  failIfMatched: true
+  expression: |
+    _assertionKeys()[?startsWith(@, "c2pa.") &&
+      !startsWith(@, "c2pa.hash.data") &&
+      !contains($allowed_assertions_v24, @) &&
+      !(contains(@, "__") && contains(startsWith(@, $allowed_assertions_v24), true)) &&
+      !contains($deprecated_assertion_labels, @)]
+  reportText:
+    'true':
+      en: All standard assertions are supported for Spec 2.4
+    'false':
+      en: "Found unsupported or unknown standard C2PA assertions: {{matches}}"
+
+- id: validation:no_deprecated_actions
+  description: Check for deprecated action types in c2pa.actions.v2
+  expression: |
+    length(_actionsV2()[?contains($deprecated_action_labels, action)]) == 0
+  reportText:
+    'true':
+      en: No deprecated actions used
+    'false':
+      en: Found deprecated actions (e.g. c2pa.copied, c2pa.printed, etc.)
+
+- id: validation:no_deprecated_claim_fields
+  description: Check for deprecated fields in the claim (e.g. specVersion in claim instead of claim_generator_info)
+  expression: |
+    _claimV2().specVersion == null
+  reportText:
+    'true':
+      en: No deprecated claim fields found
+    'false':
+      en: Found deprecated claim fields (e.g. specVersion in claim)
+
+- id: validation:mandatory_dst_for_editorial_scenarios
+  description: Check if every editorial and created action in the active manifest has a digitalSourceType
+  expression: |
+    length(notNull(_actionsV2()[? !contains($non_dst_required_actions, action) && digitalSourceType == null], `[]`)) == 0
+  reportText:
+    'true':
+      en: Every editorial and created action has a digitalSourceType
+    'false':
+      en: Found editorial or created actions missing a digitalSourceType
+
+- id: validation:ingredient_v3_choice
+  description: Check that ingredient v3 does not contain both activeManifest and digitalSourceType
+  expression: |
+    length(_ingredientAssertions()[? activeManifest != null && digitalSourceType != null]) == 0
+  reportText:
+    'true':
+      en: No ingredient v3 assertion contains both activeManifest and digitalSourceType
+    'false':
+      en: Found ingredient v3 assertion containing both activeManifest and digitalSourceType
+
+- id: validation:alternative_content_representation_choice
+  description: Check that alternative content representation has exactly one of multiAssetPartIndex or embeddedOriginalPreservationImage
+  expression: |
+    length(_assertionValues()[?
+      (type == "exif.originalPreservationImage" || parameters.type == "exif.originalPreservationImage") &&
+      ((parameters.multiAssetPartIndex != null && parameters.embeddedOriginalPreservationImage != null) ||
+       (parameters.multiAssetPartIndex == null && parameters.embeddedOriginalPreservationImage == null))
+    ]) == 0
+  reportText:
+    'true':
+      en: Alternative content representation assertions have valid choice of parameters
+    'false':
+      en: Found alternative content representation assertion with invalid choice of parameters (both or neither present)
+
+- id: validation:forbidden_labels_in_external_references
+  description: Check that external references do not point to forbidden labels
+  expression: |
+    length(_assertionValues()[? label != null && url != null && relationship == null &&
+      (contains(`["c2pa.actions", "c2pa.external-reference"]`, label) ||
+       startsWith(label, "c2pa.hash") ||
+       startsWith(label, "c2pa.ingredient"))]) == 0
+  reportText:
+    'true':
+      en: No external references point to forbidden labels
+    'false':
+      en: Found external reference pointing to a forbidden label
+
+- id: validation:no_url_in_hashes
+  description: Check that deprecated url field is not present in hash assertions (Spec 2.4)
+  expression: |
+    (manifests[0].assertions.'c2pa.hash.data' == null ||
+      manifests[0].assertions.'c2pa.hash.data'.url == null) &&
+    (manifests[0].assertions.'c2pa.hash.bmff.v3' == null ||
+      manifests[0].assertions.'c2pa.hash.bmff.v3'.url == null)
+  reportText:
+    'true':
+      en: No deprecated url field found in hash assertions
+    'false':
+      en: Found deprecated url field in hash assertions
+
+- id: validation:ingredient_v3_mandatory_validation_results
+  description: Check that ingredient v3 has validationResults if activeManifest is present
+  expression: |
+    length(_ingredientAssertions()[? activeManifest != null && validationResults == null]) == 0
+  reportText:
+    'true':
+      en: Ingredient v3 assertions with activeManifest correctly include validationResults
+    'false':
+      en: Found ingredient v3 assertion with activeManifest but missing validationResults

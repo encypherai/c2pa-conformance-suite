@@ -1,0 +1,7 @@
+{
+  "manifests": [
+    {
+      "label": "urn:uuid:abc"
+    }
+  ]
+}

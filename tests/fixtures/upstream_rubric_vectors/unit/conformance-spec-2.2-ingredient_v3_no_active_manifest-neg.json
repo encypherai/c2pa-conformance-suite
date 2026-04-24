@@ -1,0 +1,12 @@
+{
+  "manifests": [
+    {
+      "assertions": {
+        "c2pa.ingredient.v3": {
+          "relationship": "parentOf",
+          "validationResults": []
+        }
+      }
+    }
+  ]
+}

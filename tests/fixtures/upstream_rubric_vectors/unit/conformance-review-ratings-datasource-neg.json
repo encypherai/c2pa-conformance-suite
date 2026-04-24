@@ -1,0 +1,21 @@
+{
+  "manifests": [
+    {
+      "label": "urn:c2pa:default",
+      "assertions": {
+        "c2pa.metadata": {
+          "reviewRatings": [
+            {
+              "rating": {
+                "value": 5
+              }
+            }
+          ],
+          "dataSource": {
+            "type": "humanEntry.anonymous"
+          }
+        }
+      }
+    }
+  ]
+}

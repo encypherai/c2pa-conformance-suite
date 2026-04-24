@@ -1,0 +1,14 @@
+{
+  "manifests": [
+    {
+      "claim.v2": {
+        "claim_generator_info": [
+          {
+            "name": "My Generator",
+            "version": "1.0"
+          }
+        ]
+      }
+    }
+  ]
+}

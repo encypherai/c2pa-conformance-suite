@@ -1,0 +1,9 @@
+{
+  "manifests": [
+    {
+      "assertions": {
+        "c2pa.actions.v2": {}
+      }
+    }
+  ]
+}

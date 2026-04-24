@@ -1,0 +1,15 @@
+{
+  "manifests": [
+    {
+      "assertions": {
+        "c2pa.actions.v2": {
+          "actions": [
+            {
+              "action": "c2pa.copied"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "manifests": [
+    {
+      "claim.v2": {
+        "claim_generator_info": {}
+      }
+    }
+  ]
+}

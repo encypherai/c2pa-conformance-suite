@@ -1,0 +1,13 @@
+{
+  "manifests": [
+    {
+      "assertions": {
+        "c2pa.some_assertion": {
+          "dataSource": {
+            "type": "humanEntry.anonymous"
+          }
+        }
+      }
+    }
+  ]
+}

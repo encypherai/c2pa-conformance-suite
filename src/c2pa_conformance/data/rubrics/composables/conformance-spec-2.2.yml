@@ -1,0 +1,88 @@
+- id: validation:active_manifest_urn
+  description: Check if the active manifest URN uses 'urn:c2pa:' prefix (v2.2+ requirement)
+  expression: |
+    startsWith(notNull(manifests[0].label, ""), "urn:c2pa:")
+  reportText:
+    'true':
+      en: Active manifest URN uses standard 'urn:c2pa:' prefix
+    'false':
+      en: Active manifest URN uses old 'urn:uuid' prefix (pre-v2.2)
+
+- id: validation:no_deprecated_assertions
+  description: Check for known deprecated assertion labels (e.g. from v2.0 or earlier specs)
+  failIfMatched: true
+  expression: |
+    _assertionKeys()[?startsWith(@, "stds.") || contains($deprecated_assertion_labels, @)]
+  reportText:
+    'true':
+      en: No deprecated standard assertions found
+    'false':
+      en: "Found deprecated standard assertions: {{matches}}"
+
+- id: validation:no_unsupported_assertions
+  description: Check if all C2PA standard assertions are in the allow-list for Spec 2.2
+  failIfMatched: true
+  expression: |
+    _assertionKeys()[?startsWith(@, "c2pa.") &&
+      !startsWith(@, "c2pa.hash.data") &&
+      !contains($allowed_assertions_v22, @) &&
+      !(contains(@, "__") && contains(startsWith(@, $allowed_assertions_v22), true)) &&
+      !contains($deprecated_assertion_labels, @)]
+  reportText:
+    'true':
+      en: All standard assertions are supported for Spec 2.2
+    'false':
+      en: "Found unsupported or unknown standard C2PA assertions: {{matches}}"
+
+- id: validation:no_deprecated_actions
+  description: Check for deprecated action types in c2pa.actions.v2
+  expression: |
+    length(_actionsV2()[?contains($deprecated_action_labels, action)]) == 0
+  reportText:
+    'true':
+      en: No deprecated actions used
+    'false':
+      en: Found deprecated actions (e.g. c2pa.copied, c2pa.printed, etc.)
+
+- id: validation:review_ratings_datasource
+  description: Check that reviewRatings is absent when dataSource type is human entry
+  expression: |
+    length(_assertionValues()[? reviewRatings != null && contains($human_entry_source_types, dataSource.type)]) == 0
+  reportText:
+    'true':
+      en: No invalid co-occurrence of reviewRatings and human entry dataSource
+    'false':
+      en: Found reviewRatings in an assertion with human entry dataSource
+
+- id: validation:ingredient_v3_no_active_manifest
+  description: Check that ingredient v3 has no validationResults if no activeManifest
+  expression: |
+    length(_ingredientAssertions()[? activeManifest == null && validationResults != null]) == 0
+  reportText:
+    'true':
+      en: Ingredient v3 assertions without activeManifest correctly omit validationResults
+    'false':
+      en: Found ingredient v3 assertion without activeManifest but containing validationResults
+
+- id: validation:ingredient_relationship_values
+  description: Check that the relationship field in all ingredient assertions is valid
+  expression: |
+    length(_ingredientAssertions()[? !contains($valid_relationship_values, relationship)]) == 0
+  reportText:
+    'true':
+      en: All ingredient assertions have valid relationship values
+    'false':
+      en: Found ingredient assertion with invalid relationship value
+
+- id: validation:update_manifest_constraints
+  description: Check constraints for Update Manifests (no thumbnail, exactly one parentOf ingredient)
+  expression: |
+    manifests[0].assertions.'c2pa.hash.data' != null ||
+    length(_ingredientAssertions()) == 0 ||
+    (manifests[0].assertions.'c2pa.thumbnail.claim' == null &&
+      length(_ingredientAssertions()[? relationship == "parentOf"]) == 1)
+  reportText:
+    'true':
+      en: Update manifest constraints are satisfied (or manifest is not an update manifest)
+    'false':
+      en: Update manifest violates constraints (has thumbnail or does not have exactly one parentOf ingredient)

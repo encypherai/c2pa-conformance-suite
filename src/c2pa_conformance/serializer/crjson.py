@@ -20,7 +20,7 @@ _CRJSON_CONTEXT = {"@vocab": "https://c2pa.org/crjson/"}
 
 # Generator metadata embedded in every crJSON output
 _GENERATOR_NAME = "c2pa-conformance-suite"
-_GENERATOR_VERSION = "1.1.0"
+_GENERATOR_VERSION = "1.3.0"
 
 # ---------------------------------------------------------------------------
 # Status code classification

@@ -1,0 +1,14 @@
+{
+  "manifests": [
+    {
+      "assertions": {
+        "c2pa.thumbnail.claim": {
+          "format": "image/jpeg"
+        },
+        "c2pa.ingredient.v3": {
+          "relationship": "parentOf"
+        }
+      }
+    }
+  ]
+}
