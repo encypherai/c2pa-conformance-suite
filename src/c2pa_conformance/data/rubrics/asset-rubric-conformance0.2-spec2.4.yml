@@ -135,7 +135,7 @@ expressions:
   _actionsV2: manifests[0].assertions.'c2pa.actions.v2'.actions || `[]`
   _claimV2: manifests[0].'claim.v2'
   _createdAssertions: manifests[0].'claim.v2'.created_assertions || `[]`
-  _ingredientAssertions: values(manifests[0].assertions || `{}`)[? relationship != null]
+  _ingredientAssertions: values(manifests[0].assertions || `{}`)[? relationship != null()]
 
 ---
 
@@ -164,7 +164,7 @@ expressions:
       en: Found c2pa.opened actions with a digitalSourceType
 - id: validation:mandatory_spec_version
   description: Check if specVersion is present in claim_generator_info (mandatory since v0.2)
-  expression: '_claimV2().claim_generator_info.specVersion != null
+  expression: '_claimV2().claim_generator_info.specVersion != null()
 
     '
   reportText:
@@ -174,7 +174,7 @@ expressions:
       en: Missing mandatory 'specVersion' in claim_generator_info
 - id: validation:well_formed_data_present
   description: Check if validation results are present for structural analysis
-  expression: 'manifests[0].validationResults != null
+  expression: 'manifests[0].validationResults != null()
 
     '
   reportText:
@@ -196,7 +196,7 @@ expressions:
       en: 'Found structural failures: {{matches}}'
 - id: validation:valid_data_present
   description: Check if validation results are present for integrity analysis
-  expression: 'manifests[0].validationResults != null
+  expression: 'manifests[0].validationResults != null()
 
     '
   reportText:
@@ -217,7 +217,7 @@ expressions:
       en: 'Found validation mismatches: {{matches}}'
 - id: validation:trusted_data_present
   description: Check if validation results are present for trust analysis
-  expression: 'manifests[0].validationResults != null
+  expression: 'manifests[0].validationResults != null()
 
     '
   reportText:
@@ -263,7 +263,7 @@ expressions:
     _assertionKeys()[?startsWith(@, "c2pa.") &&
       !startsWith(@, "c2pa.hash.data") &&
       !contains($allowed_assertions_v24, @) &&
-      !(contains(@, "__") && contains(startsWith(@, $allowed_assertions_v24), true)) &&
+      !(contains(@, "__") && contains(startsWith(@, $allowed_assertions_v24), true())) &&
       !contains($deprecated_assertion_labels, @)]
   reportText:
     'true':
@@ -283,7 +283,7 @@ expressions:
 - id: validation:review_ratings_datasource
   description: Check that reviewRatings is absent when dataSource type is human entry
   expression: |
-    length(_assertionValues()[? reviewRatings != null && contains($human_entry_source_types, dataSource.type)]) == 0
+    length(_assertionValues()[? reviewRatings != null() && contains($human_entry_source_types, dataSource.type)]) == 0
   reportText:
     'true':
       en: No invalid co-occurrence of reviewRatings and human entry dataSource
@@ -292,7 +292,7 @@ expressions:
 - id: validation:ingredient_v3_no_active_manifest
   description: Check that ingredient v3 has no validationResults if no activeManifest
   expression: |
-    length(_ingredientAssertions()[? activeManifest == null && validationResults != null]) == 0
+    length(_ingredientAssertions()[? activeManifest == null() && validationResults != null()]) == 0
   reportText:
     'true':
       en: Ingredient v3 assertions without activeManifest correctly omit validationResults
@@ -312,9 +312,9 @@ expressions:
   description: |-
     Check constraints for Update Manifests (no thumbnail, exactly one parentOf ingredient)
   expression: |
-    manifests[0].assertions.'c2pa.hash.data' != null ||
+    manifests[0].assertions.'c2pa.hash.data' != null() ||
     length(_ingredientAssertions()) == 0 ||
-    (manifests[0].assertions.'c2pa.thumbnail.claim' == null &&
+    (manifests[0].assertions.'c2pa.thumbnail.claim' == null() &&
       length(_ingredientAssertions()[? relationship == "parentOf"]) == 1)
   reportText:
     'true':
@@ -326,7 +326,7 @@ expressions:
 - id: validation:no_deprecated_claim_fields
   description: |-
     Check for deprecated fields in the claim (e.g. specVersion in claim instead of claim_generator_info)
-  expression: '_claimV2().specVersion == null
+  expression: '_claimV2().specVersion == null()
 
     '
   reportText:
@@ -338,7 +338,7 @@ expressions:
   description: |-
     Check if every editorial and created action in the active manifest has a digitalSourceType
   expression: |
-    length(notNull(_actionsV2()[? !contains($non_dst_required_actions, action) && digitalSourceType == null], `[]`)) == 0
+    length(notNull(_actionsV2()[? !contains($non_dst_required_actions, action) && digitalSourceType == null()], `[]`)) == 0
   reportText:
     'true':
       en: Every editorial and created action has a digitalSourceType
@@ -348,7 +348,7 @@ expressions:
   description: |-
     Check that ingredient v3 does not contain both activeManifest and digitalSourceType
   expression: |
-    length(_ingredientAssertions()[? activeManifest != null && digitalSourceType != null]) == 0
+    length(_ingredientAssertions()[? activeManifest != null() && digitalSourceType != null()]) == 0
   reportText:
     'true':
       en: No ingredient v3 assertion contains both activeManifest and digitalSourceType
@@ -361,8 +361,8 @@ expressions:
   expression: |
     length(_assertionValues()[?
       (type == "exif.originalPreservationImage" || parameters.type == "exif.originalPreservationImage") &&
-      ((parameters.multiAssetPartIndex != null && parameters.embeddedOriginalPreservationImage != null) ||
-       (parameters.multiAssetPartIndex == null && parameters.embeddedOriginalPreservationImage == null))
+      ((parameters.multiAssetPartIndex != null() && parameters.embeddedOriginalPreservationImage != null()) ||
+       (parameters.multiAssetPartIndex == null() && parameters.embeddedOriginalPreservationImage == null()))
     ]) == 0
   reportText:
     'true':
@@ -373,7 +373,7 @@ expressions:
 - id: validation:forbidden_labels_in_external_references
   description: Check that external references do not point to forbidden labels
   expression: |
-    length(_assertionValues()[? label != null && url != null && relationship == null &&
+    length(_assertionValues()[? label != null() && url != null() && relationship == null() &&
       (contains(`["c2pa.actions", "c2pa.external-reference"]`, label) ||
        startsWith(label, "c2pa.hash") ||
        startsWith(label, "c2pa.ingredient"))]) == 0
@@ -385,10 +385,10 @@ expressions:
 - id: validation:no_url_in_hashes
   description: Check that deprecated url field is not present in hash assertions (Spec 2.4)
   expression: |
-    (manifests[0].assertions.'c2pa.hash.data' == null ||
-      manifests[0].assertions.'c2pa.hash.data'.url == null) &&
-    (manifests[0].assertions.'c2pa.hash.bmff.v3' == null ||
-      manifests[0].assertions.'c2pa.hash.bmff.v3'.url == null)
+    (manifests[0].assertions.'c2pa.hash.data' == null() ||
+      manifests[0].assertions.'c2pa.hash.data'.url == null()) &&
+    (manifests[0].assertions.'c2pa.hash.bmff.v3' == null() ||
+      manifests[0].assertions.'c2pa.hash.bmff.v3'.url == null())
   reportText:
     'true':
       en: No deprecated url field found in hash assertions
@@ -397,7 +397,7 @@ expressions:
 - id: validation:ingredient_v3_mandatory_validation_results
   description: Check that ingredient v3 has validationResults if activeManifest is present
   expression: |
-    length(_ingredientAssertions()[? activeManifest != null && validationResults == null]) == 0
+    length(_ingredientAssertions()[? activeManifest != null() && validationResults == null()]) == 0
   reportText:
     'true':
       en: Ingredient v3 assertions with activeManifest correctly include validationResults

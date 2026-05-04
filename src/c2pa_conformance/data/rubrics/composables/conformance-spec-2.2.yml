@@ -26,7 +26,7 @@
     _assertionKeys()[?startsWith(@, "c2pa.") &&
       !startsWith(@, "c2pa.hash.data") &&
       !contains($allowed_assertions_v22, @) &&
-      !(contains(@, "__") && contains(startsWith(@, $allowed_assertions_v22), true)) &&
+      !(contains(@, "__") && contains(startsWith(@, $allowed_assertions_v22), true())) &&
       !contains($deprecated_assertion_labels, @)]
   reportText:
     'true':
@@ -47,7 +47,7 @@
 - id: validation:review_ratings_datasource
   description: Check that reviewRatings is absent when dataSource type is human entry
   expression: |
-    length(_assertionValues()[? reviewRatings != null && contains($human_entry_source_types, dataSource.type)]) == 0
+    length(_assertionValues()[? reviewRatings != null() && contains($human_entry_source_types, dataSource.type)]) == 0
   reportText:
     'true':
       en: No invalid co-occurrence of reviewRatings and human entry dataSource
@@ -57,7 +57,7 @@
 - id: validation:ingredient_v3_no_active_manifest
   description: Check that ingredient v3 has no validationResults if no activeManifest
   expression: |
-    length(_ingredientAssertions()[? activeManifest == null && validationResults != null]) == 0
+    length(_ingredientAssertions()[? activeManifest == null() && validationResults != null()]) == 0
   reportText:
     'true':
       en: Ingredient v3 assertions without activeManifest correctly omit validationResults
@@ -77,9 +77,9 @@
 - id: validation:update_manifest_constraints
   description: Check constraints for Update Manifests (no thumbnail, exactly one parentOf ingredient)
   expression: |
-    manifests[0].assertions.'c2pa.hash.data' != null ||
+    manifests[0].assertions.'c2pa.hash.data' != null() ||
     length(_ingredientAssertions()) == 0 ||
-    (manifests[0].assertions.'c2pa.thumbnail.claim' == null &&
+    (manifests[0].assertions.'c2pa.thumbnail.claim' == null() &&
       length(_ingredientAssertions()[? relationship == "parentOf"]) == 1)
   reportText:
     'true':

@@ -50,7 +50,7 @@ variables:
   description: >-
     Check that the collection data hash assertion specifies a hash algorithm
   expression: >-
-    manifests[0].assertions.'c2pa.hash.collection.data'.alg != null
+    manifests[0].assertions.'c2pa.hash.collection.data'.alg != null()
   reportText:
     'true':
       en: Collection data hash assertion specifies a hash algorithm

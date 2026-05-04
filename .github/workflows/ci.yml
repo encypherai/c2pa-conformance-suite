@@ -27,6 +27,17 @@ jobs:
       - name: Test
         run: uv run pytest tests/ -v --ignore=tests/test_integration_c2patool.py
 
+  lint-rubrics:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Lint rubric expressions
+        run: python3 scripts/lint_rubric_keywords.py src/c2pa_conformance/data/rubrics/
+
   security:
     runs-on: ubuntu-latest
     steps:

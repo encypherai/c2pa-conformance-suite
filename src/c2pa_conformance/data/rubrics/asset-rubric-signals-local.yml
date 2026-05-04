@@ -98,8 +98,8 @@ expressions:
 - id: inception:signal_mediaUnknownProvenance
   description: Check if the manifest contains a Media of Unknown Provenance inception signal
   expression: |
-    assertions.'c2pa.ingredient.v3' != null &&
-    assertions.'c2pa.ingredient.v3'.activeManifest == null
+    assertions.'c2pa.ingredient.v3' != null() &&
+    assertions.'c2pa.ingredient.v3'.activeManifest == null()
   reportText:
     'true':
       en: Contains Media of Unknown Provenance
@@ -138,7 +138,7 @@ expressions:
   description: Check if the manifest contains an Editorial GenAI Transformations signal
   expression: |
     _hasActionsV2() &&
-    length(_signalActions()[? action != null &&
+    length(_signalActions()[? action != null() &&
       !contains($non_editorial_actions, action) &&
       contains($genai_dst_types, digitalSourceType)]) > 0
   reportText:
@@ -150,9 +150,9 @@ expressions:
   description: Check if the manifest contains an Editorial Non-GenAI Transformations signal
   expression: |
     _hasActionsV2() &&
-    length(_signalActions()[? action != null &&
+    length(_signalActions()[? action != null() &&
       !contains($non_editorial_actions, action) &&
-      digitalSourceType != null &&
+      digitalSourceType != null() &&
       !contains($genai_dst_types, digitalSourceType)]) > 0
   reportText:
     'true':
@@ -164,7 +164,7 @@ expressions:
     Check if the manifest contains an Editorial Transformations Possibly Using GenAI signal
   expression: |
     _hasActionsV2() &&
-    length(_signalActions()[? action != null &&
+    length(_signalActions()[? action != null() &&
       !contains($non_editorial_actions, action) &&
       contains($possibly_genai_dst_types, digitalSourceType)]) > 0
   reportText:
@@ -176,7 +176,7 @@ expressions:
   description: Check if the manifest contains a Non-Editorial Transformations signal
   expression: |
     _hasActionsV2() &&
-    length(_signalActions()[? action != null &&
+    length(_signalActions()[? action != null() &&
       contains($non_editorial_transformation_actions, action)]) > 0
   reportText:
     'true':

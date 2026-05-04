@@ -1,7 +1,7 @@
 - id: validation:mandatory_spec_version
   description: Check if specVersion is present in claim_generator_info (mandatory since v0.2)
   expression: |
-    _claimV2().claim_generator_info.specVersion != null
+    _claimV2().claim_generator_info.specVersion != null()
   reportText:
     'true':
       en: Found 'specVersion' in claim_generator_info

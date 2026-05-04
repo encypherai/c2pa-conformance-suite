@@ -1,7 +1,7 @@
 - id: validation:well_formed_data_present
   description: Check if validation results are present for structural analysis
   expression: |
-    manifests[0].validationResults != null
+    manifests[0].validationResults != null()
   reportText:
     'true':
       en: Validation results are present for structural analysis
@@ -22,7 +22,7 @@
 - id: validation:valid_data_present
   description: Check if validation results are present for integrity analysis
   expression: |
-    manifests[0].validationResults != null
+    manifests[0].validationResults != null()
   reportText:
     'true':
       en: Validation results are present for integrity analysis
@@ -43,7 +43,7 @@
 - id: validation:trusted_data_present
   description: Check if validation results are present for trust analysis
   expression: |
-    manifests[0].validationResults != null
+    manifests[0].validationResults != null()
   reportText:
     'true':
       en: Validation results are present for trust analysis

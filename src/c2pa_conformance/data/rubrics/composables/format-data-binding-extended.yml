@@ -50,7 +50,7 @@ variables:
   description: >-
     Check that the data hash assertion specifies exclusion ranges
   expression: >-
-    _assertionValues()[?contains(_assertionKeys(), $data_hash_label)].exclusions != null
+    _assertionValues()[?contains(_assertionKeys(), $data_hash_label)].exclusions != null()
   reportText:
     'true':
       en: Data hash assertion specifies exclusion ranges
@@ -63,7 +63,7 @@ variables:
   description: >-
     Check that the data hash assertion specifies a hash algorithm
   expression: >-
-    _assertionValues()[?contains(_assertionKeys(), $data_hash_label)].alg != null
+    _assertionValues()[?contains(_assertionKeys(), $data_hash_label)].alg != null()
   reportText:
     'true':
       en: Data hash assertion specifies a hash algorithm

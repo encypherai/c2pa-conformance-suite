@@ -72,7 +72,7 @@ expressions:
 
 - id: validation:well_formed_data_present
   description: Check if validation results are present for structural analysis
-  expression: 'manifests[0].validationResults != null
+  expression: 'manifests[0].validationResults != null()
 
     '
   reportText:
@@ -94,7 +94,7 @@ expressions:
       en: 'Found structural failures: {{matches}}'
 - id: validation:valid_data_present
   description: Check if validation results are present for integrity analysis
-  expression: 'manifests[0].validationResults != null
+  expression: 'manifests[0].validationResults != null()
 
     '
   reportText:
@@ -115,7 +115,7 @@ expressions:
       en: 'Found validation mismatches: {{matches}}'
 - id: validation:trusted_data_present
   description: Check if validation results are present for trust analysis
-  expression: 'manifests[0].validationResults != null
+  expression: 'manifests[0].validationResults != null()
 
     '
   reportText:
