@@ -1,7 +1,7 @@
 """ID3v2 container extractor (MP3, FLAC with ID3v2 tags).
 
 Extracts C2PA JUMBF from an ID3v2 GEOB (General Encapsulated Object) frame
-whose MIME type field equals "application/c2pa".
+whose MIME type field equals "application/jumbf" (per C2PA spec A.3.4).
 
 ID3v2 header (10 bytes):
     "ID3" (3 bytes) + version (2 bytes) + flags (1 byte) + size (4 bytes synchsafe)
@@ -29,7 +29,12 @@ from c2pa_conformance.extractors.base import (
 )
 
 ID3_MAGIC = b"ID3"
-C2PA_MIME = b"application/c2pa"
+# C2PA spec A.3.4 says MIME "shall use the value for the media type for JUMBF"
+# which is "application/jumbf" (IANA). However, c2pa-rs (Adobe's reference
+# implementation) writes "application/c2pa" instead. Accept both for interop.
+C2PA_MIME_SPEC = b"application/jumbf"
+C2PA_MIME_C2PA_RS = b"application/c2pa"
+_ACCEPTED_MIMES = (C2PA_MIME_SPEC, C2PA_MIME_C2PA_RS)
 
 
 def _decode_synchsafe(data: bytes) -> int:
@@ -129,7 +134,7 @@ def _parse_geob(payload: bytes) -> bytes | None:
     mime_type = payload[pos:null]
     pos = null + 1
 
-    if mime_type != C2PA_MIME:
+    if mime_type not in _ACCEPTED_MIMES:
         return None
 
     # Skip filename (in declared encoding)
