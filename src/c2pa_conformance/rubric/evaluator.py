@@ -48,9 +48,7 @@ def _detect_engine(
         metadata = {}
 
     # Explicit engine declaration in metadata
-    engine_field = metadata.get("engine") or metadata.get(
-        "rubric_metadata", {}
-    ).get("engine")
+    engine_field = metadata.get("engine") or metadata.get("rubric_metadata", {}).get("engine")
     if engine_field:
         return engine_field
 
@@ -101,21 +99,21 @@ def evaluate_rubric(
     Returns:
         A :class:`RubricReport` with evaluation results.
     """
-    # Parse rubric if needed
+    # Parse once before engine detection. Root composable rubrics carry their
+    # `include` directive in the file, so detecting against empty metadata
+    # silently misclassifies them as legacy JMESPath and drops every included
+    # statement.
     if rubric_path is not None and statements is None:
-        # Try composable parse first for json-formula rubrics
-        detected = engine or _detect_engine(rubric_path, metadata, None)
+        from c2pa_conformance.rubric.composer import compose
+
+        composed = compose(rubric_path)
+        detected = engine or _detect_engine(rubric_path, composed.metadata, composed.statements)
         if detected == "json-formula":
-            from c2pa_conformance.rubric.composer import compose
             from c2pa_conformance.rubric.jsonformula_engine import evaluate_composed_rubric
 
-            composed = compose(rubric_path)
             return evaluate_composed_rubric(crjson_data, composed, language=language)
-
-        # Legacy JMESPath: simple parse
-        from c2pa_conformance.rubric.composer import parse_simple_rubric
-
-        metadata, statements = parse_simple_rubric(rubric_path)
+        metadata = composed.metadata
+        statements = composed.statements
 
     if statements is None:
         statements = []

@@ -3,8 +3,8 @@ rubric_metadata:
   version: 0.1.0
   description: >-
     Rubric for formats that use c2pa.hash.data with byte-range exclusions
-    for content binding (FLAC, OTF, JXL). Validates the presence and
-    structure of data hash assertions alongside standard integrity checks.
+    for content binding (FLAC, Ogg Vorbis, OTF, JXL). Validates the presence
+    and structure of data hash assertions alongside standard integrity checks.
 include:
   - composables/globals.yml
   - composables/integrity.yml

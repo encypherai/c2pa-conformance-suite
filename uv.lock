@@ -43,7 +43,7 @@ requires-dist = [
     { name = "click", specifier = ">=8.1.0" },
     { name = "cryptography", specifier = ">=44.0.0" },
     { name = "jmespath", specifier = ">=1.0.0" },
-    { name = "json-formula", git = "https://github.com/lrosenthol/json-formula-py.git" },
+    { name = "json-formula", git = "https://github.com/adobe/json-formula-py.git" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.13" },
     { name = "pip-audit", marker = "extra == 'dev'", specifier = ">=2.7.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
@@ -422,7 +422,7 @@ wheels = [
 [[package]]
 name = "json-formula"
 version = "0.1.0"
-source = { git = "https://github.com/lrosenthol/json-formula-py.git#a5396bb18fdd9a91f07b7b1f0677f678dda50808" }
+source = { git = "https://github.com/adobe/json-formula-py.git#8fbb6077f512e4ffa644647703744627d89497ad" }
 
 [[package]]
 name = "librt"

@@ -1,8 +1,8 @@
 # Rubric composable: collection data hash binding validation.
 #
-# Checks that ZIP-based formats (EPUB, DOCX, ODT, OXPS) use a
-# c2pa.hash.collection.data assertion and that no collection hash
-# validation failures are present.
+# Checks that ZIP-based formats (EPUB, DOCX, XLSX, PPTX, ODT, ODS, ODP,
+# OXPS) use a c2pa.hash.collection.data assertion and have no collection
+# hash validation failures.
 #
 # Include this composable in format-specific rubrics for ZIP-based formats.
 
@@ -16,6 +16,7 @@ variables:
     - "assertion.collectionHash.mismatch"
     - "assertion.collectionHash.malformed"
     - "assertion.collectionHash.invalidURI"
+    - "assertion.collectionHash.incorrectFileCount"
 
 ---
 

@@ -64,7 +64,7 @@ python_version = "3.11"
 strict = true
 
 [tool.uv.sources]
-json-formula = { git = "https://github.com/lrosenthol/json-formula-py.git" }
+json-formula = { git = "https://github.com/adobe/json-formula-py.git" }
 
 [dependency-groups]
 dev = [

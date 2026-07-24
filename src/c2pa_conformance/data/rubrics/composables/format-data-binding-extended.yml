@@ -1,8 +1,8 @@
 # Rubric composable: extended data hash binding validation.
 #
 # Checks that formats using c2pa.hash.data with byte-range exclusions
-# (FLAC, OTF, JXL) have a valid binding assertion and no data hash
-# validation failures.
+# (FLAC, Ogg Vorbis, OTF, JXL) have a valid binding assertion and no data
+# hash validation failures.
 #
 # Include this composable in format-specific rubrics for formats
 # that use c2pa.hash.data with exclusion ranges.

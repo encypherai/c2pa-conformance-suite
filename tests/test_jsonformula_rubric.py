@@ -63,7 +63,10 @@ class TestRubricResultType:
 
     def test_to_dict_with_matches(self) -> None:
         r = RubricResult(
-            id="x", description="", value=False, report_text="bad",
+            id="x",
+            description="",
+            value=False,
+            report_text="bad",
             matches=["a", "b"],
         )
         d = r.to_dict()
@@ -77,7 +80,8 @@ class TestRubricResultType:
 class TestRubricReportType:
     def test_pass_fail_count(self) -> None:
         rpt = RubricReport(
-            rubric_name="test", rubric_version="1.0",
+            rubric_name="test",
+            rubric_version="1.0",
             results=[
                 RubricResult(id="a", description="", value=True, report_text=""),
                 RubricResult(id="b", description="", value=False, report_text=""),
@@ -241,7 +245,10 @@ class TestJsonFormulaEvaluator:
             }
         ]
         report = evaluate_jsonformula_rubric(
-            data, stmts, variables=variables, expressions=expressions,
+            data,
+            stmts,
+            variables=variables,
+            expressions=expressions,
         )
         assert report.pass_count == 1
 
@@ -311,11 +318,13 @@ class TestComposer:
 
     def test_compose_no_includes(self, tmp_path: Path) -> None:
         rubric = tmp_path / "simple.yml"
-        content = yaml.dump({
-            "rubric_metadata": {"name": "simple", "version": "1.0"},
-            "variables": {"$x": 1},
-            "expressions": {"_f": "1+1"},
-        })
+        content = yaml.dump(
+            {
+                "rubric_metadata": {"name": "simple", "version": "1.0"},
+                "variables": {"$x": 1},
+                "expressions": {"_f": "1+1"},
+            }
+        )
         content += "\n---\n"
         content += yaml.dump([{"id": "c1", "expression": "$x", "description": ""}])
         rubric.write_text(content)
@@ -329,20 +338,24 @@ class TestComposer:
     def test_compose_with_include(self, tmp_path: Path) -> None:
         # Create globals file
         globals_file = tmp_path / "globals.yml"
-        globals_content = yaml.dump({
-            "rubric_metadata": {"name": "globals"},
-            "variables": {"$shared": [1, 2, 3]},
-            "expressions": {"_helper": "length($shared)"},
-        })
+        globals_content = yaml.dump(
+            {
+                "rubric_metadata": {"name": "globals"},
+                "variables": {"$shared": [1, 2, 3]},
+                "expressions": {"_helper": "length($shared)"},
+            }
+        )
         globals_file.write_text(globals_content)
 
         # Create rubric that includes globals
         rubric = tmp_path / "rubric.yml"
-        content = yaml.dump({
-            "rubric_metadata": {"name": "main", "version": "2.0"},
-            "include": ["globals.yml"],
-            "variables": {"$local": "extra"},
-        })
+        content = yaml.dump(
+            {
+                "rubric_metadata": {"name": "main", "version": "2.0"},
+                "include": ["globals.yml"],
+                "variables": {"$local": "extra"},
+            }
+        )
         content += "\n---\n"
         content += yaml.dump([{"id": "c1", "expression": "_helper()", "description": ""}])
         rubric.write_text(content)
@@ -356,17 +369,23 @@ class TestComposer:
     def test_compose_override_order(self, tmp_path: Path) -> None:
         """Current file variables override included ones."""
         globals_file = tmp_path / "base.yml"
-        globals_file.write_text(yaml.dump({
-            "rubric_metadata": {"name": "base"},
-            "variables": {"$x": "from_base", "$base_only": True},
-        }))
+        globals_file.write_text(
+            yaml.dump(
+                {
+                    "rubric_metadata": {"name": "base"},
+                    "variables": {"$x": "from_base", "$base_only": True},
+                }
+            )
+        )
 
         rubric = tmp_path / "main.yml"
-        content = yaml.dump({
-            "rubric_metadata": {"name": "main", "version": "1"},
-            "include": ["base.yml"],
-            "variables": {"$x": "from_main"},
-        })
+        content = yaml.dump(
+            {
+                "rubric_metadata": {"name": "main", "version": "1"},
+                "include": ["base.yml"],
+                "variables": {"$x": "from_main"},
+            }
+        )
         rubric.write_text(content)
 
         composed = compose(rubric)
@@ -384,10 +403,14 @@ class TestComposer:
 
     def test_compose_missing_include(self, tmp_path: Path) -> None:
         rubric = tmp_path / "main.yml"
-        rubric.write_text(yaml.dump({
-            "rubric_metadata": {"name": "main"},
-            "include": ["nonexistent.yml"],
-        }))
+        rubric.write_text(
+            yaml.dump(
+                {
+                    "rubric_metadata": {"name": "main"},
+                    "include": ["nonexistent.yml"],
+                }
+            )
+        )
 
         with pytest.raises(FileNotFoundError):
             compose(rubric)
@@ -395,23 +418,33 @@ class TestComposer:
     def test_compose_two_level_include(self, tmp_path: Path) -> None:
         """Test three-level include: main -> mid -> base."""
         base = tmp_path / "base.yml"
-        base.write_text(yaml.dump({
-            "rubric_metadata": {"name": "base"},
-            "variables": {"$base_var": 1},
-        }))
+        base.write_text(
+            yaml.dump(
+                {
+                    "rubric_metadata": {"name": "base"},
+                    "variables": {"$base_var": 1},
+                }
+            )
+        )
 
         mid = tmp_path / "mid.yml"
-        mid.write_text(yaml.dump({
-            "rubric_metadata": {"name": "mid"},
-            "include": ["base.yml"],
-            "variables": {"$mid_var": 2},
-        }))
+        mid.write_text(
+            yaml.dump(
+                {
+                    "rubric_metadata": {"name": "mid"},
+                    "include": ["base.yml"],
+                    "variables": {"$mid_var": 2},
+                }
+            )
+        )
 
         main = tmp_path / "main.yml"
-        content = yaml.dump({
-            "rubric_metadata": {"name": "main", "version": "1"},
-            "include": ["mid.yml"],
-        })
+        content = yaml.dump(
+            {
+                "rubric_metadata": {"name": "main", "version": "1"},
+                "include": ["mid.yml"],
+            }
+        )
         content += "\n---\n"
         content += yaml.dump([{"id": "c1", "expression": "true", "description": ""}])
         main.write_text(content)
@@ -431,11 +464,16 @@ class TestEvaluatorDispatcher:
         rubric = tmp_path / "legacy.yml"
         content = yaml.dump({"rubric_metadata": {"name": "legacy", "version": "1"}})
         content += "\n---\n"
-        content += yaml.dump([{
-            "id": "c1", "description": "test",
-            "expression": "length(manifests)",
-            "report_text": {"true": {"en": "ok"}, "false": {"en": "fail"}},
-        }])
+        content += yaml.dump(
+            [
+                {
+                    "id": "c1",
+                    "description": "test",
+                    "expression": "length(manifests)",
+                    "report_text": {"true": {"en": "ok"}, "false": {"en": "fail"}},
+                }
+            ]
+        )
         rubric.write_text(content)
 
         report = evaluate_rubric({"manifests": [1]}, rubric_path=rubric)
@@ -445,24 +483,64 @@ class TestEvaluatorDispatcher:
         rubric = tmp_path / "jf.yml"
         content = yaml.dump({"rubric_metadata": {"name": "jf", "version": "1"}})
         content += "\n---\n"
-        content += yaml.dump([{
-            "id": "c1", "description": "test",
-            "expression": "1 == 1",
-            "reportText": {"true": {"en": "ok"}},
-        }])
+        content += yaml.dump(
+            [
+                {
+                    "id": "c1",
+                    "description": "test",
+                    "expression": "1 == 1",
+                    "reportText": {"true": {"en": "ok"}},
+                }
+            ]
+        )
         rubric.write_text(content)
 
         report = evaluate_rubric({}, rubric_path=rubric)
         assert report.pass_count == 1
 
+    def test_jsonformula_root_include_is_composed(self, tmp_path: Path) -> None:
+        included = tmp_path / "included.yml"
+        included.write_text(
+            yaml.dump({"rubric_metadata": {"name": "included"}})
+            + "\n---\n"
+            + yaml.dump(
+                [
+                    {
+                        "id": "included",
+                        "description": "test",
+                        "expression": "1 == 1",
+                        "reportText": {"true": {"en": "ok"}},
+                    }
+                ]
+            )
+        )
+        rubric = tmp_path / "root.yml"
+        rubric.write_text(
+            yaml.dump(
+                {
+                    "rubric_metadata": {"name": "root", "version": "1"},
+                    "include": ["included.yml"],
+                }
+            )
+        )
+
+        report = evaluate_rubric({}, rubric_path=rubric)
+        assert report.pass_count == 1
+        assert report.results[0].id == "included"
+
     def test_forced_engine(self) -> None:
-        stmts = [{
-            "id": "c1", "description": "test",
-            "expression": "length(items)",
-            "report_text": {"true": {"en": "ok"}, "false": {"en": "fail"}},
-        }]
+        stmts = [
+            {
+                "id": "c1",
+                "description": "test",
+                "expression": "length(items)",
+                "report_text": {"true": {"en": "ok"}, "false": {"en": "fail"}},
+            }
+        ]
         report = evaluate_rubric(
-            {"items": [1, 2]}, statements=stmts, engine="jmespath",
+            {"items": [1, 2]},
+            statements=stmts,
+            engine="jmespath",
         )
         assert report.pass_count == 1
 
@@ -517,23 +595,31 @@ class TestSignalEvaluatorHelpers:
 class TestSignalEvaluator:
     def test_simple_signal_rubric(self, tmp_path: Path) -> None:
         rubric = tmp_path / "signal.yml"
-        content = yaml.dump({
-            "rubric_metadata": {"name": "signals", "version": "1.0"},
-        })
+        content = yaml.dump(
+            {
+                "rubric_metadata": {"name": "signals", "version": "1.0"},
+            }
+        )
         content += "\n---\n"
-        content += yaml.dump([{
-            "id": "inception:capturedMedia",
-            "expression": "length(keys(assertions || `{}`)) > 0",
-            "reportText": {"true": {"en": "Contains captured media"}},
-        }])
+        content += yaml.dump(
+            [
+                {
+                    "id": "inception:capturedMedia",
+                    "expression": "length(keys(assertions || `{}`)) > 0",
+                    "reportText": {"true": {"en": "Contains captured media"}},
+                }
+            ]
+        )
         rubric.write_text(content)
 
         data = {
-            "manifests": [{
-                "label": "urn:test",
-                "assertions": {"c2pa.actions.v2": {"actions": []}},
-                "signature": {"certificateInfo": {"subject": {"CN": "Test", "O": "Org"}}},
-            }]
+            "manifests": [
+                {
+                    "label": "urn:test",
+                    "assertions": {"c2pa.actions.v2": {"actions": []}},
+                    "signature": {"certificateInfo": {"subject": {"CN": "Test", "O": "Org"}}},
+                }
+            ]
         }
         report = evaluate_signal_rubric(data, rubric)
         assert isinstance(report, SignalRubricReport)
