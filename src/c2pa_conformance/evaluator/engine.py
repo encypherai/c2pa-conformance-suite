@@ -14,6 +14,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from c2pa_conformance.extractors.text import C2PATXT_MAGIC, find_text_wrappers
+
 
 class ResultType(Enum):
     """Outcome of a predicate evaluation."""
@@ -797,16 +799,25 @@ def _eval_coverage_check(context: dict[str, Any], condition: dict[str, Any]) -> 
 
 
 def _eval_scan_for_magic(context: dict[str, Any], condition: dict[str, Any]) -> tuple[bool, str]:
-    """Find magic bytes/string in asset_bytes context field."""
+    """Find the wrapper magic in the asset.
+
+    The C2PATextManifestWrapper magic (``C2PATXT\\0``) is variation-selector
+    encoded, so it is looked for in the DECODED wrapper blocks the text
+    extractor finds; any other magic is a literal byte scan.
+    """
     asset_bytes = context.get("asset_bytes")
     if asset_bytes is None:
         return True, ""
 
     magic = condition.get("magic_bytes", "")
     on_not_found = condition.get("on_not_found", {})
+    magic_bytes = magic.encode() if isinstance(magic, str) else bytes(magic)
 
     if isinstance(asset_bytes, (bytes, bytearray)):
-        found = magic.encode() in asset_bytes if isinstance(magic, str) else magic in asset_bytes
+        if magic_bytes == C2PATXT_MAGIC:
+            found = bool(find_text_wrappers(bytes(asset_bytes)))
+        else:
+            found = magic_bytes in asset_bytes
     else:
         found = magic in str(asset_bytes)
 
@@ -816,20 +827,26 @@ def _eval_scan_for_magic(context: dict[str, Any], condition: dict[str, Any]) -> 
 
 
 def _eval_parse_wrapper(context: dict[str, Any], condition: dict[str, Any]) -> tuple[bool, str]:
-    """Parse text manifest wrapper (structural check placeholder).
-
-    Full implementation requires the text extractor's wrapper parser.
-    Returns pass whenever asset_bytes is present in context.
-    """
-    if context.get("asset_bytes") is None:
+    """Parse every wrapper the magic scan found: version 0x01 and a manifest that fits."""
+    asset_bytes = context.get("asset_bytes")
+    if asset_bytes is None or not isinstance(asset_bytes, (bytes, bytearray)):
         return True, ""
+    wrappers = find_text_wrappers(bytes(asset_bytes))
+    if not wrappers:
+        return True, ""
+    on_malformed = condition.get("on_malformed", {})
+    if any(not wrapper.complete for wrapper in wrappers):
+        return False, on_malformed.get("status", "")
     return True, ""
 
 
 def _eval_check_uniqueness(context: dict[str, Any], condition: dict[str, Any]) -> tuple[bool, str]:
-    """Verify exactly one instance of a wrapper/marker exists."""
-    wrapper_count = context.get("wrapper_count")
+    """Verify exactly one C2PATextManifestWrapper exists in the asset."""
     on_multiple = condition.get("on_multiple", {})
+    wrapper_count = context.get("wrapper_count")
+    asset_bytes = context.get("asset_bytes")
+    if wrapper_count is None and isinstance(asset_bytes, (bytes, bytearray)):
+        wrapper_count = len(find_text_wrappers(bytes(asset_bytes)))
     if wrapper_count is not None and int(wrapper_count) > 1:
         return False, on_multiple.get("status", "")
     return True, ""

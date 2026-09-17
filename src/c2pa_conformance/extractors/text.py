@@ -97,34 +97,57 @@ def _has_vs_wrapper(data: bytes) -> bool:
     return BOM_UTF8 in data
 
 
-def _try_vs_extract(data: bytes) -> ExtractionResult | None:
-    """Try to extract JUMBF from a VS-encoded C2PATextManifestWrapper."""
-    # Find U+FEFF marker
+class TextWrapper:
+    """One decoded C2PATextManifestWrapper found in a text asset."""
+
+    __slots__ = ("offset", "version", "manifest_length", "jumbf_bytes", "complete")
+
+    def __init__(
+        self, offset: int, version: int, manifest_length: int, jumbf_bytes: bytes, complete: bool
+    ) -> None:
+        self.offset = offset
+        self.version = version
+        self.manifest_length = manifest_length
+        self.jumbf_bytes = jumbf_bytes
+        self.complete = complete
+
+
+def find_text_wrappers(data: bytes) -> list[TextWrapper]:
+    """Every VS-encoded block whose decoded header starts with the official magic.
+
+    The magic ``C2PATXT\\0`` never appears literally in the asset: it is carried
+    as variation selectors after a U+FEFF marker, so a byte scan for the ASCII
+    string finds nothing. This decodes each BOM-prefixed run and reports every
+    block that carries the magic, including malformed ones (wrong version or a
+    truncated manifest), so a validator can distinguish "no wrapper" from
+    "corrupted wrapper" from "multiple wrappers".
+    """
+    wrappers: list[TextWrapper] = []
     bom_pos = data.find(BOM_UTF8)
     while bom_pos != -1:
-        vs_start = bom_pos + len(BOM_UTF8)
-        decoded = _decode_vs_bytes(data, vs_start)
-
-        if len(decoded) >= 13 and decoded[:8] == C2PATXT_MAGIC:
-            version = decoded[8]
-            if version != 1:
-                bom_pos = data.find(BOM_UTF8, bom_pos + 1)
-                continue
-
-            manifest_length = int.from_bytes(decoded[9:13], "big")
-            header_size = 13
-
-            if len(decoded) >= header_size + manifest_length:
-                jumbf_bytes = decoded[header_size : header_size + manifest_length]
-                return ExtractionResult(
-                    jumbf_bytes=jumbf_bytes,
-                    container_format="text",
-                    jumbf_offset=bom_pos,
-                    jumbf_length=len(jumbf_bytes),
-                )
-
+        decoded = _decode_vs_bytes(data, bom_pos + len(BOM_UTF8))
+        if len(decoded) >= 8 and decoded[:8] == C2PATXT_MAGIC:
+            version = decoded[8] if len(decoded) > 8 else -1
+            manifest_length = int.from_bytes(decoded[9:13], "big") if len(decoded) >= 13 else -1
+            jumbf = decoded[13 : 13 + manifest_length] if manifest_length >= 0 else b""
+            complete = (
+                version == 1 and manifest_length >= 0 and len(decoded) >= 13 + manifest_length
+            )
+            wrappers.append(TextWrapper(bom_pos, version, manifest_length, bytes(jumbf), complete))
         bom_pos = data.find(BOM_UTF8, bom_pos + 1)
+    return wrappers
 
+
+def _try_vs_extract(data: bytes) -> ExtractionResult | None:
+    """Extract JUMBF from the first complete VS-encoded C2PATextManifestWrapper."""
+    for wrapper in find_text_wrappers(data):
+        if wrapper.complete:
+            return ExtractionResult(
+                jumbf_bytes=wrapper.jumbf_bytes,
+                container_format="text",
+                jumbf_offset=wrapper.offset,
+                jumbf_length=len(wrapper.jumbf_bytes),
+            )
     return None
 
 

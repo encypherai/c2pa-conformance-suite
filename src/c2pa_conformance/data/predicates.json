@@ -32,8 +32,8 @@
               {
                 "step": 1,
                 "op": "scan_for_magic",
-                "description": "Scan the asset bytes for the C2PATextManifestWrapper magic number",
-                "magic_bytes": "C2PA_MANIFEST",
+                "description": "Decode every U+FEFF-prefixed variation-selector block and look for the C2PATextManifestWrapper magic C2PATXT\\0 (the magic is never present as literal bytes)",
+                "magic_bytes": "C2PATXT\u0000",
                 "on_not_found": {
                   "status": "manifest.text.corruptedWrapper",
                   "result": "fail"
@@ -81,8 +81,8 @@
           "test_vectors": {
             "passing": {
               "description": "A text file with a single valid C2PATextManifestWrapper whose data hash matches after excluding wrapper bytes",
-              "asset_content_hex": "48656c6c6f20576f726c640a433250415f4d414e49464553542e2e2e0a",
-              "notes": "Hex-encoded: 'Hello World\\nC2PA_MANIFEST...\\n'. The wrapper region is the C2PA_MANIFEST line. The hash is computed over 'Hello World\\n' only."
+              "asset_content_hex": "48656c6c6f20576f726c640aefbbbff3a08483f3a08482f3a08490f3a08481f3a08494f3a08498f3a08494efb880efb881efb880efb880efb880efb880",
+              "notes": "Hex-encoded: 'Hello World\\n' followed by U+FEFF and the variation-selector encoding of C2PATXT\\0, version 0x01 and a zero manifestLength (a header-only wrapper for illustration). The wrapper region is everything from U+FEFF to the last variation selector. The hash is computed over 'Hello World\\n' only."
             },
             "failing_no_wrapper": {
               "description": "A text file with no C2PATextManifestWrapper present",
