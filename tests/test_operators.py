@@ -25,6 +25,7 @@ from c2pa_conformance.evaluator.engine import (
     _eval_one_of_type,
     _eval_ordered_fallback,
     _eval_ordered_match,
+    _eval_parse_wrapper,
     _eval_priority_check,
     _eval_scan_for_delimiters,
     _eval_scan_for_magic,
@@ -509,33 +510,90 @@ class TestCoverageCheck:
 # ---------------------------------------------------------------------------
 
 
-class TestScanForMagic:
-    def _cond(self) -> dict[str, Any]:
-        return {
-            "op": "scan_for_magic",
-            "magic_bytes": "C2PA_MANIFEST",
-            "on_not_found": {"status": "manifest.text.corruptedWrapper"},
-        }
+def _vs(byte: int) -> bytes:
+    if byte <= 0x0F:
+        return bytes([0xEF, 0xB8, 0x80 + byte])
+    cp = 0xE0100 + (byte - 0x10)
+    return bytes(
+        [
+            0xF0 | (cp >> 18),
+            0x80 | ((cp >> 12) & 0x3F),
+            0x80 | ((cp >> 6) & 0x3F),
+            0x80 | (cp & 0x3F),
+        ]
+    )
 
-    def test_magic_found_in_bytes(self) -> None:
-        ctx = {"asset_bytes": b"some data C2PA_MANIFEST more data"}
-        ok, _ = _eval_scan_for_magic(ctx, self._cond())
+
+def _text_wrapper(jumbf: bytes, *, version: int = 1, declared_length: int | None = None) -> bytes:
+    """A U+FEFF-prefixed, variation-selector-encoded C2PATextManifestWrapper."""
+    length = len(jumbf) if declared_length is None else declared_length
+    binary = b"C2PATXT\x00" + bytes([version]) + length.to_bytes(4, "big") + jumbf
+    return b"\xef\xbb\xbf" + b"".join(_vs(byte) for byte in binary)
+
+
+_WRAPPER_MAGIC_COND: dict[str, Any] = {
+    "op": "scan_for_magic",
+    "magic_bytes": "C2PATXT\u0000",
+    "on_not_found": {"status": "manifest.text.corruptedWrapper"},
+}
+
+
+class TestScanForMagic:
+    def test_official_magic_is_found_only_through_the_variation_selector_encoding(self) -> None:
+        asset = b"Hello World\n" + _text_wrapper(b"jumbf-bytes")
+        ok, _ = _eval_scan_for_magic({"asset_bytes": asset}, _WRAPPER_MAGIC_COND)
         assert ok is True
 
-    def test_magic_not_found(self) -> None:
-        ctx = {"asset_bytes": b"this does not contain the marker"}
-        ok, msg = _eval_scan_for_magic(ctx, self._cond())
+    def test_literal_magic_bytes_are_not_a_wrapper(self) -> None:
+        # The spec magic never appears as literal bytes in a signed text asset.
+        ok, msg = _eval_scan_for_magic(
+            {"asset_bytes": b"Hello C2PATXT\x00 literal"}, _WRAPPER_MAGIC_COND
+        )
         assert ok is False
         assert msg == "manifest.text.corruptedWrapper"
 
+    def test_legacy_armor_is_not_the_official_wrapper(self) -> None:
+        asset = b"---BEGIN C2PA MANIFEST---\nQUJD\n---END C2PA MANIFEST---\n"
+        ok, msg = _eval_scan_for_magic({"asset_bytes": asset}, _WRAPPER_MAGIC_COND)
+        assert ok is False
+        assert msg == "manifest.text.corruptedWrapper"
+
+    def test_other_magic_values_are_a_literal_byte_scan(self) -> None:
+        cond = {"op": "scan_for_magic", "magic_bytes": "RIFF", "on_not_found": {"status": "x"}}
+        assert _eval_scan_for_magic({"asset_bytes": b"RIFF....WAVE"}, cond)[0] is True
+        assert _eval_scan_for_magic({"asset_bytes": b"nothing"}, cond) == (False, "x")
+
     def test_no_asset_bytes_in_context(self) -> None:
         # Without asset_bytes we cannot verify, so we pass
-        ok, _ = _eval_scan_for_magic({}, self._cond())
+        ok, _ = _eval_scan_for_magic({}, _WRAPPER_MAGIC_COND)
         assert ok is True
 
-    def test_magic_found_in_string(self) -> None:
-        ctx = {"asset_bytes": "preamble C2PA_MANIFEST suffix"}
-        ok, _ = _eval_scan_for_magic(ctx, self._cond())
+
+class TestParseWrapper:
+    _COND: dict[str, Any] = {
+        "op": "parse_wrapper",
+        "on_malformed": {"status": "manifest.text.corruptedWrapper"},
+    }
+
+    def test_well_formed_wrapper_parses(self) -> None:
+        ok, _ = _eval_parse_wrapper({"asset_bytes": b"x\n" + _text_wrapper(b"jumbf")}, self._COND)
+        assert ok is True
+
+    def test_wrong_version_is_malformed(self) -> None:
+        ok, msg = _eval_parse_wrapper(
+            {"asset_bytes": _text_wrapper(b"jumbf", version=2)}, self._COND
+        )
+        assert (ok, msg) == (False, "manifest.text.corruptedWrapper")
+
+    def test_truncated_manifest_is_malformed(self) -> None:
+        ok, msg = _eval_parse_wrapper(
+            {"asset_bytes": _text_wrapper(b"jumbf", declared_length=64)}, self._COND
+        )
+        assert (ok, msg) == (False, "manifest.text.corruptedWrapper")
+
+    def test_no_wrapper_is_not_a_parse_failure(self) -> None:
+        # Absence is the magic scan's finding, not this step's.
+        ok, _ = _eval_parse_wrapper({"asset_bytes": b"plain text"}, self._COND)
         assert ok is True
 
 
@@ -558,6 +616,14 @@ class TestCheckUniqueness:
     def test_no_count_passes(self) -> None:
         ok, _ = _eval_check_uniqueness({}, self._cond())
         assert ok is True
+
+    def test_count_is_derived_from_the_asset_when_absent(self) -> None:
+        one = b"a\n" + _text_wrapper(b"jumbf")
+        assert _eval_check_uniqueness({"asset_bytes": one}, self._cond())[0] is True
+        ok, msg = _eval_check_uniqueness(
+            {"asset_bytes": one + _text_wrapper(b"jumbf")}, self._cond()
+        )
+        assert (ok, msg) == (False, "manifest.text.multipleWrappers")
 
 
 class TestScanForDelimiters:
