@@ -54,7 +54,7 @@ class JPEGExtractor:
 
         # Sort by packet sequence and concatenate payloads
         segments.sort(key=lambda s: s[0])
-        jumbf_bytes = b"".join(payload for _, _, payload in segments)
+        jumbf_bytes = _reassemble_jumbf(segments)
 
         # Truncate to declared jumb superbox size to avoid trailing bytes
         # from segment boundaries
@@ -72,6 +72,31 @@ class JPEGExtractor:
             jumbf_offset=first_offset,
             jumbf_length=len(jumbf_bytes),
         )
+
+
+def _reassemble_jumbf(segments: list[tuple[int, int, bytes]]) -> bytes:
+    """Reassemble the JUMBF superbox from APP11 packets.
+
+    JPEG XT / JUMBF-in-JPEG (ISO/IEC 18477-3, used by c2pa-rs's JPEG writer) repeats the
+    superbox's LBox and TBox (the first 8 bytes of the box) at the start of EVERY packet of
+    a box, not only the first. A naive concatenation therefore inserts 8 stray bytes per
+    additional packet, which shifts every box after the first segment boundary and makes the
+    claim signature unparseable and the data hash mismatch. Strip the repeated header from
+    packets after the first when it is present; writers that do not repeat it (this suite's
+    own embedder) keep working because the header is only stripped when it matches.
+    """
+    if not segments:
+        return b""
+    first = segments[0][2]
+    if len(first) < 8:
+        return b"".join(payload for _, _, payload in segments)
+    box_header = first[:8]  # LBox + TBox of the superbox
+    parts = [first]
+    for _, _, payload in segments[1:]:
+        if payload[:8] == box_header:
+            payload = payload[8:]
+        parts.append(payload)
+    return b"".join(parts)
 
 
 def _find_app11_jumbf_segments(

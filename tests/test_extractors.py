@@ -612,3 +612,62 @@ class TestAutoDetect:
         p.write_bytes(b"\x00\x01\x02\x03")
         with pytest.raises(ExtractionError, match="No extractor found"):
             detect_and_extract(p)
+
+
+class TestJPEGMultiPacketRepeatedBoxHeader:
+    """c2pa-rs (and ISO/IEC 18477-3) repeat LBox+TBox at the start of every APP11 packet."""
+
+    @staticmethod
+    def _app11(en: int, z: int, payload: bytes) -> bytes:
+        import struct as _struct
+
+        body = b"\x4a\x50" + _struct.pack(">H", en) + _struct.pack(">I", z) + payload
+        return b"\xff\xeb" + _struct.pack(">H", len(body) + 2) + body
+
+    def test_repeated_header_is_stripped_from_later_packets(self) -> None:
+        import struct as _struct
+
+        from c2pa_conformance.extractors.jpeg import _reassemble_jumbf
+
+        inner = b"\x00" * 100
+        lbox = 8 + len(inner)
+        header = _struct.pack(">I", lbox) + b"jumb"
+        box = header + inner
+        # writer splits the box after 60 bytes and repeats the 8-byte header on packet 2
+        pkt1, pkt2 = box[:60], header + box[60:]
+        segments = [(1, 20, pkt1), (2, 100, pkt2)]
+        out = _reassemble_jumbf(segments)
+        assert out == box
+        assert len(out) == lbox
+
+    def test_writer_without_repeated_header_still_reassembles(self) -> None:
+        import struct as _struct
+
+        from c2pa_conformance.extractors.jpeg import _reassemble_jumbf
+
+        inner = bytes(range(256)) * 2
+        lbox = 8 + len(inner)
+        box = _struct.pack(">I", lbox) + b"jumb" + inner
+        segments = [(1, 20, box[:300]), (2, 400, box[300:])]
+        assert _reassemble_jumbf(segments) == box
+
+    def test_extract_two_packet_jpeg_with_repeated_header(self) -> None:
+        import struct as _struct
+
+        from c2pa_conformance.extractors.jpeg import JPEGExtractor
+
+        inner = b"\x11" * 150
+        lbox = 8 + len(inner)
+        header = _struct.pack(">I", lbox) + b"jumb"
+        box = header + inner
+        pkt1, pkt2 = box[:80], header + box[80:]
+        jpeg = (
+            b"\xff\xd8"
+            + self._app11(1, 1, pkt1)
+            + self._app11(1, 2, pkt2)
+            + b"\xff\xda\x00\x02"
+            + b"\xff\xd9"
+        )
+        result = JPEGExtractor().extract(jpeg)
+        assert result.jumbf_bytes == box
+        assert result.jumbf_length == lbox
